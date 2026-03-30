@@ -1351,6 +1351,12 @@ void jit_brgemm_kernel_t<Wmm>::store_accumulators_apply_post_ops(dim_t bd_block,
                         vbroadcastss(
                                 vmm_wei_scales, Xmm(vmm_wei_scales.getIdx()));
                         break;
+                    case data_type::e8m0:
+                        vpbroadcastb(vmm_wei_scales, addr);
+                        uni_vpmovzxbd(
+                                vmm_wei_scales, Xmm(vmm_wei_scales.getIdx()));
+                        uni_vpslld(vmm_wei_scales, vmm_wei_scales, 23);
+                        break;
                     default: assert(!"unsupported wei_scales data type");
                 }
             } else {
@@ -1370,6 +1376,10 @@ void jit_brgemm_kernel_t<Wmm>::store_accumulators_apply_post_ops(dim_t bd_block,
                             break;
                         case data_type::f16:
                             vcvtph2ps(vmm_wei_scales_masked, addr);
+                            break;
+                        case data_type::e8m0:
+                            uni_vpmovzxbd(vmm_wei_scales_masked, addr);
+                            uni_vpslld(vmm_wei_scales, vmm_wei_scales, 23);
                             break;
                         default: assert(!"unsupported wei_scales data type");
                     }
