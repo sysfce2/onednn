@@ -75,7 +75,7 @@ public:
     microkernel::Package gemmMicrokernelPackage(const GEMMProblem &problem, const GEMMStrategy &strategy, const ngen::InterfaceHandler &interface_, const microkernel::Protocol &protocol, uint32_t gmdid, bool transposeC = false);
 
     // Driver information retrieval.
-    static CommonDriverInfo driverInfo(GEMMProblem problem, const GEMMStrategy &strategy);
+    static CommonDriverInfo driverInfo(ngen::PF pf, GEMMProblem problem, const GEMMStrategy &strategy);
 
 protected:
     ngen::InterfaceHandler &interface = super::interface_;

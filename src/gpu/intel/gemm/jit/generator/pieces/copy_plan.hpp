@@ -173,7 +173,9 @@ public:
     using GRFAllocator = std::function<void(int count, ngen::GRFRange &range)>;
     using FlagAllocator = std::function<void(int bytes, ngen::FlagRegister &flag)>;
 
-    CopyPlan(ngen::HW hw_, bool systolicAvailable_) : hw(hw_), systolicAvailable(systolicAvailable_) {}
+    CopyPlan(ngen::PF pf_, bool systolicAvailable_)
+        : hw(getCore(pf_)), pf(pf_),
+          systolicAvailable(systolicAvailable_) {}
 
     CopyInstruction &append(CopyInstruction &&i);
     CopyInstruction &append(ngen::Opcode op, int simd, const CopyOperand &dst, const CopyOperand &src0, const CopyOperand &src1 = CopyOperand(), const CopyOperand &src2 = CopyOperand());
@@ -198,6 +200,7 @@ public:
 
 protected:
     ngen::HW hw;
+    ngen::PF pf;
     bool systolicAvailable;
     bool freezeCNums = false;
     std::vector<CopyInstruction> insns, newInsns;
@@ -389,7 +392,7 @@ void CopyResource::initialize(Generator &g)
     auto dataF  = (const float *)    &data[0];
     int n32 = (n + 3) >> 2;
 
-    const bool do64 = (g.getHardware() >= HW::XeHPC);
+    const bool do64 = (g.getProductFamily() >= PF::GenericXeHPC);
     GRF r(src.ngen().getBase());
     for (int i = 0; 2*i+1 < n32; i++) {
         if (do64) {

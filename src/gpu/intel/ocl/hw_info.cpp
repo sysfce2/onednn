@@ -68,7 +68,7 @@ status_t init_gpu_hw_info(impl::engine_t *engine, cl_device_id device,
     bool is_xelpg = (product.family == ngen::ProductFamily::ARL
             || product.family == ngen::ProductFamily::MTL);
 
-    gpu_arch = jit::convert_ngen_arch_to_dnnl(ngen::getCore(product.family));
+    gpu_arch = jit::convert_ngen_arch_to_dnnl(product.family);
     std::memcpy(&product_, &product, sizeof(ngen::Product));
 
     mayiuse_systolic = false;

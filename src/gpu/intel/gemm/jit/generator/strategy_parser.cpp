@@ -29,7 +29,7 @@ using namespace ngen;
 
 static void unparseAccessType(std::ostream &s, const MatrixAddressingStrategy &astrategy);
 static void unparseAddressBase(std::ostream &s, ngen::AddressBase base);
-static void unparseCaching(HW hw, std::ostream &s, const MatrixAddressingStrategy &astrategy);
+static void unparseCaching(HW hw, PF pf, std::ostream &s, const MatrixAddressingStrategy &astrategy);
 static void unparseTiling(std::ostream &s, const MatrixAddressingStrategy &astrategy);
 
 bool native64Bit(HW hw)
@@ -118,9 +118,9 @@ CacheSettingsLSC getCaching(char l1, char l2, char l3) {
     throw std::runtime_error("Unknown cache setting");
 }
 
-CacheSettingsLSC getCachingEntry(std::stringstream &s, HW hw)
+CacheSettingsLSC getCachingEntry(std::stringstream &s, PF pf)
 {
-    if (hw >= HW::XE3P_35_10) {
+    if (pf >= PF::XE3P_35_10) {
         char l1, l2, l3;
         s >> l1 >> l2 >> l3;
         return getCaching(l1, l2, l3);
@@ -132,7 +132,7 @@ CacheSettingsLSC getCachingEntry(std::stringstream &s, HW hw)
     }
 }
 
-void getCaching(std::stringstream &s, HW hw, MatrixAddressingStrategy &astrategy, bool leaveDefault = false)
+void getCaching(std::stringstream &s, PF pf, MatrixAddressingStrategy &astrategy, bool leaveDefault = false)
 {
     auto &cachingR = astrategy.cachingR;
     auto &cachingW = astrategy.cachingW;
@@ -140,19 +140,19 @@ void getCaching(std::stringstream &s, HW hw, MatrixAddressingStrategy &astrategy
     if (!leaveDefault) {
         cachingR = CacheSettingsLSC::L1C_L3C;
         cachingW = CacheSettingsLSC::L1WB_L3WB;
-        if (hw >= HW::XeHPC)
+        if (pf >= PF::GenericXeHPC)
             cachingW = CacheSettingsLSC::L1UC_L3WB;
-        if (hw >= HW::XE3P_35_10)
+        if (pf >= PF::XE3P_35_10)
             cachingR = CacheSettingsLSC::L1C_L2C_L3C;
     }
 
     if (s.peek() == '{') {
         char eat;
         s >> eat;
-        cachingR = getCachingEntry(s, hw);
+        cachingR = getCachingEntry(s, pf);
         s >> eat;
         if (eat == '/') {
-            cachingW = getCachingEntry(s, hw);
+            cachingW = getCachingEntry(s, pf);
             s >> eat;
         }
         if (eat != '}')
@@ -170,7 +170,7 @@ static void getTiling(std::stringstream &s, MatrixAddressingStrategy &astrategy)
     }
 }
 
-void parseStrategy(const char *str, HW hw, const GEMMProblem &problem, GEMMStrategy &strategy)
+void parseStrategy(const char *str, PF pf, const GEMMProblem &problem, GEMMStrategy &strategy)
 {
     std::stringstream s(str);
     s.imbue(std::locale::classic());
@@ -185,6 +185,7 @@ void parseStrategy(const char *str, HW hw, const GEMMProblem &problem, GEMMStrat
 
     auto A64 = AddressBase::createA64(true);
     auto BTS = AddressBase::createBTS(0);
+    auto hw = ngen::getCore(pf);
 
     s >> std::ws >> asA >> accessA;
         if (s.peek() == '/') s >> eat >> accessAUnaligned;
@@ -192,7 +193,7 @@ void parseStrategy(const char *str, HW hw, const GEMMProblem &problem, GEMMStrat
         if (s.peek() == '/') s >> eat >> strategy.ka_load_masked;
         getTiling(s, strategy.A);
         if (s.peek() == 'x') s >> eat >> strategy.A_copies;
-        getCaching(s, hw, strategy.A);
+        getCaching(s, pf, strategy.A);
     if (s.peek() == '+') {
         s >> eat;
         if (s.peek() != '+') {
@@ -202,14 +203,14 @@ void parseStrategy(const char *str, HW hw, const GEMMProblem &problem, GEMMStrat
             if (s.peek() == '@') s >> eat >> strategy.prefetchA;
             if (s.peek() == '/') s >> eat >> strategy.prefetchAMasked;
             else strategy.prefetchAMasked = strategy.prefetchA;
-            getCaching(s, hw, strategy.A_prefetch);
+            getCaching(s, pf, strategy.A_prefetch);
         }
     }
     if (s.peek() == '+') {
         strategy.l3PrefetchA = true;
         s >> eat >> accessABPrefetchL3 >> strategy.ka_prefetchL3;
         if (s.peek() == '@') s >> eat >> strategy.prefetchABL3;
-        getCaching(s, hw, strategy.AB_prefetchL3, true);
+        getCaching(s, pf, strategy.AB_prefetchL3, true);
     }
     s >> std::ws >> asB >> accessB;
         if (s.peek() == '/') s >> eat >> accessBUnaligned;
@@ -217,7 +218,7 @@ void parseStrategy(const char *str, HW hw, const GEMMProblem &problem, GEMMStrat
         if (s.peek() == '/') s >> eat >> strategy.kb_load_masked;
         getTiling(s, strategy.B);
         if (s.peek() == 'x') s >> eat >> strategy.B_copies;
-        getCaching(s, hw, strategy.B);
+        getCaching(s, pf, strategy.B);
     if (s.peek() == '+') {
         s >> eat;
         if (s.peek() != '+') {
@@ -227,23 +228,23 @@ void parseStrategy(const char *str, HW hw, const GEMMProblem &problem, GEMMStrat
             if (s.peek() == '@') s >> eat >> strategy.prefetchB;
             if (s.peek() == '/') s >> eat >> strategy.prefetchBMasked;
             else strategy.prefetchBMasked = strategy.prefetchB;
-            getCaching(s, hw, strategy.B_prefetch);
+            getCaching(s, pf, strategy.B_prefetch);
         }
     }
     if (s.peek() == '+') {
         strategy.l3PrefetchB = true;
         s >> eat >> accessABPrefetchL3 >> strategy.kb_prefetchL3;
         if (s.peek() == '@') s >> eat >> strategy.prefetchABL3;
-        getCaching(s, hw, strategy.AB_prefetchL3, true);
+        getCaching(s, pf, strategy.AB_prefetchL3, true);
     }
     s >> std::ws >> asC >> accessC;
         getTiling(s, strategy.C);
-        getCaching(s, hw, strategy.C);
+        getCaching(s, pf, strategy.C);
     if (s.peek() == '+') {
         strategy.prefetchC = 1;
         s >> eat >> accessCPrefetch;
         if (s.peek() == '@') s >> eat >> strategy.prefetchC;
-        getCaching(s, hw, strategy.C_prefetch);
+        getCaching(s, pf, strategy.C_prefetch);
     }
 
     if (!accessAUnaligned) accessAUnaligned = downgradeBlock2D(accessA);
@@ -252,7 +253,7 @@ void parseStrategy(const char *str, HW hw, const GEMMProblem &problem, GEMMStrat
     strategy.A.base = strategy.A_prefetch.base = getAddressBase(asA);
     strategy.B.base = strategy.B_prefetch.base = getAddressBase(asB);
     strategy.C.base = strategy.C_prefetch.base = getAddressBase(asC);
-    strategy.CO.base = (hw >= HW::XeHPG) ? A64 : BTS;
+    strategy.CO.base = (pf >= PF::GenericXeHPG) ? A64 : BTS;
     strategy.A.newDP = bool(std::isupper(accessA));
     strategy.B.newDP = bool(std::isupper(accessB));
     strategy.C.newDP = bool(std::isupper(accessC));
@@ -265,7 +266,7 @@ void parseStrategy(const char *str, HW hw, const GEMMProblem &problem, GEMMStrat
     strategy.A.cachingW = CacheSettingsLSC::Default;
     strategy.B.cachingW = CacheSettingsLSC::Default;
     strategy.CO.cachingR = CacheSettingsLSC::L1C_L3C;
-    if (hw >= HW::XE3P_35_10) strategy.CO.cachingR = CacheSettingsLSC::L1C_L2C_L3C;
+    if (pf >= PF::XE3P_35_10) strategy.CO.cachingR = CacheSettingsLSC::L1C_L2C_L3C;
     strategy.A_prefetch.prefetch = true;
     strategy.B_prefetch.prefetch = true;
     strategy.C_prefetch.prefetch = true;
@@ -286,7 +287,7 @@ void parseStrategy(const char *str, HW hw, const GEMMProblem &problem, GEMMStrat
     strategy.AB_prefetchL3.base = getAddressBase(strategy.l3PrefetchA ? asA : asB);
     if (strategy.AB_prefetchL3.cachingR == CacheSettingsLSC::Default) {
         strategy.AB_prefetchL3.cachingR = CacheSettingsLSC::L1UC_L3C;
-        if (hw >= HW::XE3P_35_10)
+        if (pf >= PF::XE3P_35_10)
             strategy.AB_prefetchL3.cachingR = CacheSettingsLSC::L1UC_L2C_L3C;
     }
 
@@ -618,7 +619,7 @@ void parseStrategy(const char *str, HW hw, const GEMMProblem &problem, GEMMStrat
     size_t poCount = problem.postOps.len();
     strategy.binary.resize(poCount);
     for (auto &astrategy: strategy.binary) {
-        astrategy.base = (hw >= HW::XeHPC) ? A64 : BTS;
+        astrategy.base = (pf >= PF::GenericXeHPC) ? A64 : BTS;
         astrategy.newDP = strategy.C.newDP;
     }
 
@@ -633,11 +634,11 @@ void parseStrategy(const char *str, HW hw, const GEMMProblem &problem, GEMMStrat
     strategy.Ag.base = strategy.A_scale.base = (surfaceAq ? BTS : A64);
     strategy.Bg.base = strategy.B_scale.base = (surfaceBq ? BTS : A64);
 
-    strategy.AO.newDP = strategy.A_scale.newDP = strategy.Ag.newDP = (hw >= HW::XeHPG);
-    strategy.BO.newDP = strategy.B_scale.newDP = strategy.Bg.newDP = (hw >= HW::XeHPG);
+    strategy.AO.newDP = strategy.A_scale.newDP = strategy.Ag.newDP = (pf >= PF::GenericXeHPG);
+    strategy.BO.newDP = strategy.B_scale.newDP = strategy.Bg.newDP = (pf >= PF::GenericXeHPG);
 }
 
-void adjustStrategy(HW hw, const GEMMProblem &problem, GEMMStrategy &strategy, const char *tags)
+void adjustStrategy(PF pf, const GEMMProblem &problem, GEMMStrategy &strategy, const char *tags)
 {
     auto *gemmAStrategy = &strategy.A, *gemmBStrategy = &strategy.B;
     if (problem.A.needA64) strategy.A.forceA64();
@@ -673,8 +674,8 @@ void adjustStrategy(HW hw, const GEMMProblem &problem, GEMMStrategy &strategy, c
             tags++;
         }
 
-        strategy.A_prefetch.preflight(hw);
-        strategy.B_prefetch.preflight(hw);
+        strategy.A_prefetch.preflight(pf);
+        strategy.B_prefetch.preflight(pf);
         if (!block2DA && strategy.A_prefetch.address2D)
             strategy.A_prefetch.address2D = false;
         if (!block2DB && strategy.B_prefetch.address2D)
@@ -699,7 +700,7 @@ void adjustStrategy(HW hw, const GEMMProblem &problem, GEMMStrategy &strategy, c
         strategy.remHandling[LoopM] = strategy.remHandling[LoopN] = RemainderHandling::Split;
 
     // ... and always use split remainder handling on later GPUs when panel checks are active.
-    if (strategy.panelCheck && strategy.lateExit() && hw >= HW::XeHP && !strategy.fixedSystolic) {
+    if (strategy.panelCheck && strategy.lateExit() && pf >= PF::GenericXeHP && !strategy.fixedSystolic) {
         if (isPacked(problem.A.layout)) strategy.remHandling[LoopM] = RemainderHandling::Split;
         if (isPacked(problem.B.layout)) strategy.remHandling[LoopN] = RemainderHandling::Split;
     }
@@ -769,10 +770,11 @@ const char *parsePrecisions(const char *s, Type &precision1, Type &precision2)
     return s;
 }
 
-std::string unparseStrategy(HW hw, const GEMMProblem &problem, const GEMMStrategy &strategy)
+std::string unparseStrategy(PF pf, const GEMMProblem &problem, const GEMMStrategy &strategy)
 {
     std::stringstream s;
     s.imbue(std::locale::classic());
+    auto hw = ngen::getCore(pf);
 
     bool anyOptAlignAB = strategy.optAlignAB || strategy.optAlignAB2D;
 
@@ -790,21 +792,21 @@ std::string unparseStrategy(HW hw, const GEMMProblem &problem, const GEMMStrateg
     unparseTiling(s, strategy.A);
     if (strategy.A_copies > 1)
         s << 'x' << strategy.A_copies;
-    unparseCaching(hw, s, strategy.A);
+    unparseCaching(hw, pf, s, strategy.A);
     if (strategy.prefetchA) {
         s << '+';
         unparseAccessType(s, strategy.A_prefetch);
         s << strategy.ka_prefetch << ',' << strategy.ka_pfStride << '@' << strategy.prefetchA;
         if (strategy.prefetchAMasked != strategy.prefetchA)
             s << '/' << strategy.prefetchAMasked;
-        unparseCaching(hw, s, strategy.A_prefetch);
+        unparseCaching(hw, pf, s, strategy.A_prefetch);
     }
     if (strategy.l3PrefetchA) {
         if (!strategy.prefetchA) s << '+';
         s << '+';
         unparseAccessType(s, strategy.AB_prefetchL3);
         s << strategy.ka_prefetchL3 << '@' << strategy.prefetchABL3;
-        unparseCaching(hw, s, strategy.AB_prefetchL3);
+        unparseCaching(hw, pf, s, strategy.AB_prefetchL3);
     }
     s << ' ';
     unparseAddressBase(s, strategy.B.base);
@@ -821,32 +823,32 @@ std::string unparseStrategy(HW hw, const GEMMProblem &problem, const GEMMStrateg
     unparseTiling(s, strategy.B);
     if (strategy.B_copies > 1)
         s << 'x' << strategy.B_copies;
-    unparseCaching(hw, s, strategy.B);
+    unparseCaching(hw, pf, s, strategy.B);
     if (strategy.prefetchB) {
         s << '+';
         unparseAccessType(s, strategy.B_prefetch);
         s << strategy.kb_prefetch << ',' << strategy.kb_pfStride << '@' << strategy.prefetchB;
         if (strategy.prefetchBMasked != strategy.prefetchB)
             s << '/' << strategy.prefetchBMasked;
-        unparseCaching(hw, s, strategy.B_prefetch);
+        unparseCaching(hw, pf, s, strategy.B_prefetch);
     }
     if (strategy.l3PrefetchB) {
         if (!strategy.prefetchB) s << '+';
         s << '+';
         unparseAccessType(s, strategy.AB_prefetchL3);
         s << strategy.kb_prefetchL3 << '@' << strategy.prefetchABL3;
-        unparseCaching(hw, s, strategy.AB_prefetchL3);
+        unparseCaching(hw, pf, s, strategy.AB_prefetchL3);
     }
     s << ' ';
     unparseAddressBase(s, strategy.C.base);
     unparseAccessType(s, strategy.C);
     unparseTiling(s, strategy.C);
-    unparseCaching(hw, s, strategy.C);
+    unparseCaching(hw, pf, s, strategy.C);
     if (strategy.prefetchC) {
         s << '+';
         unparseAccessType(s, strategy.C_prefetch);
         s << '@' << strategy.prefetchC;
-        unparseCaching(hw, s, strategy.C_prefetch);
+        unparseCaching(hw, pf, s, strategy.C_prefetch);
     }
 
     if (strategy.slmA || strategy.slmB) {
@@ -1071,7 +1073,8 @@ void unparseAddressBase(std::ostream &s, ngen::AddressBase base)
     }
 }
 
-void unparseCaching(HW hw, std::ostream &s, const MatrixAddressingStrategy &astrategy)
+void unparseCaching(HW hw, PF pf, std::ostream &s,
+        const MatrixAddressingStrategy &astrategy)
 {
     auto cachingR = astrategy.cachingR;
     auto cachingW = astrategy.cachingW;
@@ -1083,7 +1086,7 @@ void unparseCaching(HW hw, std::ostream &s, const MatrixAddressingStrategy &astr
 
     s << '{';
 
-    if (hw >= HW::XE3P_35_10) {
+    if (pf >= PF::XE3P_35_10) {
         switch (cachingR) {
             case CacheSettingsLSC::Default:             s << "ddd"; break;
             case CacheSettingsLSC::L1UC_L2UC_L3UC:      s << "uuu"; break;

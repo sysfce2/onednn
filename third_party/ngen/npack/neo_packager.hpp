@@ -194,15 +194,8 @@ inline HW decodeGfxCoreFamily(GfxCoreFamily family)
         case GfxCoreFamily::XeHPC:        return HW::XeHPC;
         case GfxCoreFamily::Xe2:          return HW::Xe2;
         case GfxCoreFamily::Xe3:          return HW::Xe3;
-	    // XE3P_35_10 and XE3P_35_11 use duplicate GfxCore.
-	    // Detection via GfxCore is therefore unsupported.
-	    case GfxCoreFamily::XE3P_35_10:   return HW::Unknown;
-        case GfxCoreFamily::XE3P_UNKNOWN: return HW::XE3P_UNKNOWN;
-        default:                          if (family > GfxCoreFamily::XE3P_35_10) {
-                                              return HW::XE3P_UNKNOWN;
-                                          } else {
-                                              return HW::Unknown;
-                                          }
+	    case GfxCoreFamily::Xe3P:         return HW::Xe3P;
+        default:                          return HW::Unknown;
     }
 }
 
@@ -218,14 +211,8 @@ inline GfxCoreFamily encodeGfxCoreFamily(HW hw)
         case HW::XeHPC:        return GfxCoreFamily::XeHPC;
         case HW::Xe2:          return GfxCoreFamily::Xe2;
         case HW::Xe3:          return GfxCoreFamily::Xe3;
-        case HW::XE3P_35_10:   return GfxCoreFamily::XE3P_35_10;
-        case HW::XE3P_35_11:   return GfxCoreFamily::XE3P_35_11;
-        case HW::XE3P_UNKNOWN: return GfxCoreFamily::XE3P_UNKNOWN;
-        default:               if (hw > HW::XE3P_35_10) {
-                                   return GfxCoreFamily::XE3P_UNKNOWN;
-                               } else {
-                                   return GfxCoreFamily::Unknown;
-                               }
+        case HW::Xe3P:         return GfxCoreFamily::Xe3P;
+        default:               return GfxCoreFamily::Unknown;
     }
 }
 
@@ -353,7 +340,7 @@ inline NGEN_NAMESPACE::Product decodeHWIPVersion(uint32_t rawVersion)
 
 inline bool isBinaryEfficient64Bit(const std::vector<uint8_t> &binary, HW hw)
 {
-    return (hw >= HW::XE3P_35_10) && !hasGatewayEOTSend(binary);
+    return (hw >= HW::Xe3P) && !hasGatewayEOTSend(binary);
 }
 
 } /* namespace npack */

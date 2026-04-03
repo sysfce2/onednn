@@ -72,6 +72,10 @@ ngen::HW device_info_t::ngen_hw() const {
     return ngen::getCore(p.family);
 }
 
+ngen::PF device_info_t::ngen_pf() const {
+    return jit::get_ngen_product(*this).family;
+}
+
 int device_info_t::stepping_id() const {
     ngen::Product p = jit::get_ngen_product(*this);
     return p.stepping;
@@ -183,8 +187,8 @@ int device_info_t::max_subgroup_size(gpu_arch_t gpu_arch) {
 }
 
 int device_info_t::grf_size(gpu_arch_t gpu_arch) {
-    ngen::HW hw = jit::convert_dnnl_arch_to_ngen(gpu_arch);
-    return ngen::GRF::bytes(hw);
+    ngen::PF pf = jit::convert_dnnl_arch_to_ngen(gpu_arch);
+    return ngen::GRF::bytes(ngen::getCore(pf));
 }
 
 int device_info_t::min_subgroup_size() const {

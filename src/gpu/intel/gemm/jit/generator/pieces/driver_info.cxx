@@ -25,11 +25,10 @@ using namespace ngen;
 
 // Get driver information from this strategy.
 template <HW hw>
-CommonDriverInfo Generator<hw>::driverInfo(GEMMProblem problem, const GEMMStrategy &strategy)
+CommonDriverInfo Generator<hw>::driverInfo(ngen::PF pf, GEMMProblem problem, const GEMMStrategy &strategy)
 {
     CommonDriverInfo info;
-
-    problem.autoTypeConversions(hw, strategy.systolic);
+    problem.autoTypeConversions(pf, strategy.systolic);
 
     info.subgroupSize = strategy.subgroupSize;
     info.fusedLoop = strategy.fused ? strategy.fusedLoop : LoopNone;
@@ -85,7 +84,7 @@ CommonDriverInfo Generator<hw>::driverInfo(GEMMProblem problem, const GEMMStrate
     info.flags |= (strategy.fillGoal << FlagShiftFillGoal) & FlagMaskFillGoal;
     info.flags |= (static_cast<uint64_t>(strategy.cInterleaveChunk) << FlagShiftCInterleave) & FlagMaskCInterleave;
     info.slm = int(gemmSLMSize(hw, problem, strategy));
-    info.perKSLM = int(gemmPerKSLMSize(hw, problem, strategy));
+    info.perKSLM = int(gemmPerKSLMSize(pf, problem, strategy));
     info.alignment[0] = problem.A.alignment;
     info.alignment[1] = problem.B.alignment;
     info.alignment[2] = problem.C.alignment;

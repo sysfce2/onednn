@@ -40,8 +40,9 @@ bool Generator<hw>::kLoopSetup(const GEMMProblem &problem, const GEMMStrategy &s
     auto Ta = problem.Ta, Tb = problem.Tb;
     auto Ta_ext = problem.Ta_ext, Tb_ext = problem.Tb_ext;
     auto Ta_load = state.Ta_load, Tb_load = state.Tb_load;
+    auto pf = getProductFamily();
 
-    auto minOPCount = minOuterProductCount(hw, problem, strategy);
+    auto minOPCount = minOuterProductCount(pf, problem, strategy);
     auto unrollM = strategy.unroll[LoopM];
     auto unrollN = strategy.unroll[LoopN];
 
@@ -341,8 +342,8 @@ bool Generator<hw>::kLoopSetup(const GEMMProblem &problem, const GEMMStrategy &s
     }
 
     int crosspackA, crosspackB, tileM_A, tileK_A, tileK_B, tileN_B;
-    std::tie(crosspackA, crosspackB) = targetKernelCrosspack(hw, problem, strategy);
-    std::tie(tileM_A, tileK_A, tileK_B, tileN_B) = targetKernelTiling(hw, problem, strategy);
+    std::tie(crosspackA, crosspackB) = targetKernelCrosspack(pf, problem, strategy);
+    std::tie(tileM_A, tileK_A, tileK_B, tileN_B) = targetKernelTiling(pf, problem, strategy);
 
     if (!repackA && repackARem) {
         state.Ar_layout = RegisterLayout(hw, Ta, unrollM, ka_repackRem, state.A_layout.colMajor(), crosspackA, tileM_A, tileK_A);
@@ -389,12 +390,13 @@ bool Generator<hw>::gemmPrepMaskedAB(const GEMMProblem &problem, GEMMStrategy &s
 {
     bool recalc = false;
     bool shrinkUK = false;
+    auto pf = getProductFamily();
     if (!strategy.A.padded && (strategy.remHandling[LoopM] != RemainderHandling::Ignore)) {
         shrinkUK = true;
         if (strategy.ka_load > strategy.ka_load_masked) {
             status << "Downgrading ka_load: " << strategy.ka_load << " -> " << strategy.ka_load_masked << status_stream::endl;
             strategy.ka_load = strategy.ka_load_masked;
-            strategy.trimKChain(hw, strategy.ka_load, problem);
+            strategy.trimKChain(pf, strategy.ka_load, problem);
             recalc = true;
         }
         // Avoid access patterns that require double masking, unless enabled.
@@ -413,7 +415,7 @@ bool Generator<hw>::gemmPrepMaskedAB(const GEMMProblem &problem, GEMMStrategy &s
         if (strategy.kb_load > strategy.kb_load_masked) {
             status << "Downgrading kb_load: " << strategy.kb_load << " -> " << strategy.kb_load_masked << status_stream::endl;
             strategy.kb_load = strategy.kb_load_masked;
-            strategy.trimKChain(hw, strategy.kb_load, problem);
+            strategy.trimKChain(pf, strategy.kb_load, problem);
             recalc = true;
         }
         if (isBlock2D(strategy.B.accessType) || strategy.allowDoubleMasking(LoopN))

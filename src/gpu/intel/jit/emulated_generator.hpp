@@ -43,7 +43,7 @@ public:
     emulated_generator_t(const compute::device_info_t &device_info,
             const debug_config_t &debug_config)
         : generator_t<hw>(debug_config)
-        , ra_(hw)
+        , ra_(device_info.ngen_pf())
         , emu_strategy(hw, device_info.stepping_id()) {}
 
 protected:

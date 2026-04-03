@@ -33,6 +33,8 @@
 namespace ngen {
 enum class Core;
 using HW = Core;
+enum class ProductFamily;
+using PF = ProductFamily;
 } // namespace ngen
 
 namespace dnnl {
@@ -213,6 +215,7 @@ public:
     gpu_arch_t gpu_arch() const { return gpu_arch_; }
     const gpu_product_t &gpu_product() const {return gpu_product_;}
     ngen::HW ngen_hw() const;
+    ngen::PF ngen_pf() const;
     int stepping_id() const;
     uint64_t native_extensions() const { return native_extensions_; }
     bool is_integrated() const;

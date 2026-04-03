@@ -48,17 +48,18 @@ size_t gemmSLMSize(HW hw, const GEMMProblem &problem, const GEMMStrategy &strate
     return slmSize;
 }
 
-size_t gemmPerKSLMSize(HW hw, const GEMMProblem &problem, const GEMMStrategy &strategy)
+size_t gemmPerKSLMSize(PF pf, const GEMMProblem &problem, const GEMMStrategy &strategy)
 {
     size_t slmSize = 0;
 
     // Space needed for local k reduction (as much as possible).
     if (strategy.kParallelLocal) {
+        auto hw = ngen::getCore(pf);
         // Calculate max SLM usage that doesn't reduce thread count.
         int mnThreads = strategy.wg[LoopM] * strategy.wg[LoopN];
         if (mnThreads <= 0) stub();
         int concurrentK = std::max(1, threadsPerEU(hw, strategy) * eusPerSubslice(hw) / mnThreads);
-        slmSize = rounddown_pow2(maxSLMPerWG(hw, strategy.GRFs) / concurrentK);
+        slmSize = rounddown_pow2(maxSLMPerWG(pf, strategy.GRFs) / concurrentK);
         if (!problem.sumA && !problem.sumB) {
             auto singleTile = strategy.wg[LoopM] * strategy.wg[LoopN]
                             * align_up(strategy.unroll[LoopM] * strategy.unroll[LoopN] * problem.Tc, GRF::bytes(hw));

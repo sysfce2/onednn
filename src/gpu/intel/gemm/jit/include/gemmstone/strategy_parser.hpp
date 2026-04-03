@@ -25,15 +25,15 @@
 
 GEMMSTONE_NAMESPACE_START
 
-void parseStrategy(const char *str, ngen::HW hw, const GEMMProblem &problem, GEMMStrategy &strategy);
+void parseStrategy(const char *str, ngen::PF pf, const GEMMProblem &problem, GEMMStrategy &strategy);
 
-void adjustStrategy(ngen::HW hw, const GEMMProblem &problem, GEMMStrategy &strategy, const char *tags = nullptr);
+void adjustStrategy(ngen::PF pf, const GEMMProblem &problem, GEMMStrategy &strategy, const char *tags = nullptr);
 
 const char *parseLayout(const char *s, MatrixAddressing &atype);
 const char *parsePrecision(const char *s, Type &precision);
 const char *parsePrecisions(const char *s, Type &precision1, Type &precision2);
 
-std::string unparseStrategy(ngen::HW hw, const GEMMProblem &problem, const GEMMStrategy &strategy);
+std::string unparseStrategy(ngen::PF pf, const GEMMProblem &problem, const GEMMStrategy &strategy);
 
 GEMMSTONE_NAMESPACE_END
 

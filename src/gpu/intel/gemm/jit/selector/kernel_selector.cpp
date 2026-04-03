@@ -328,7 +328,7 @@ const kcatalog::Entry *upper_bound(const kcatalog::Catalog &catalog, const kcata
 }
 
 
-MatchParamsBase::MatchParamsBase(ngen::HW hw, bool systolicAvailable, bool isIntegrated, const GEMMProblem &problem_)
+MatchParamsBase::MatchParamsBase(ngen::HW hw, ngen::PF pf, bool systolicAvailable, bool isIntegrated, const GEMMProblem &problem_)
 {
     using namespace kcatalog;
 
@@ -341,7 +341,7 @@ MatchParamsBase::MatchParamsBase(ngen::HW hw, bool systolicAvailable, bool isInt
         unrollReq[LoopN] = 2;
     }
 
-    ReqBDPASDims = problem.preferBDPAS(hw);
+    ReqBDPASDims = problem.preferBDPAS(pf);
 
     if (ReqBDPASDims) {
         unrollReq[LoopM] = 8;
@@ -360,9 +360,7 @@ MatchParamsBase::MatchParamsBase(ngen::HW hw, bool systolicAvailable, bool isInt
         case ngen::HW::XeHPC:   selector.hw = kcatalog::HWTagXeHPC;   break;
         case ngen::HW::Xe2:     selector.hw = kcatalog::HWTagXe2;     break;
         case ngen::HW::Xe3:     selector.hw = kcatalog::HWTagXe3;   break;
-        case ngen::HW::XE3P_35_10:
-        case ngen::HW::XE3P_35_11:
-        case ngen::HW::XE3P_UNKNOWN:     selector.hw = kcatalog::HWTagXe3p;   break;
+        case ngen::HW::Xe3P:     selector.hw = kcatalog::HWTagXe3p;   break;
     }
 
     auto &C = problem.C;
@@ -436,12 +434,11 @@ MatchParamsBase::MatchParamsBase(ngen::HW hw, bool systolicAvailable, bool isInt
     if (problem.aoPtrDims > 0 || problem.boPtrDims > 0)
         *tagPtr++ = ReqOffsetMultiDim;
 
-    problem.autoTypeConversions(hw, systolicAvailable);
+    problem.autoTypeConversions(pf, systolicAvailable);
     if (problem.needsASums() && !problem.sumA) *tagPtr++ = ReqSumA;
     if (problem.needsBSums() && !problem.sumB) *tagPtr++ = ReqSumB;
 
-    if (one_of(hw, {ngen::HW::Xe2, ngen::HW::Xe3, ngen::HW::XE3P_35_10, ngen::HW::XE3P_35_11, ngen::HW::XE3P_UNKNOWN})) *tagPtr++ = ReqXe2Block2D;
-
+    if (one_of(hw, {ngen::HW::Xe2, ngen::HW::Xe3, ngen::HW::Xe3P})) *tagPtr++ = ReqXe2Block2D;
 
     sizes.batch = sizes.m = sizes.n = sizes.k = 0;
 }

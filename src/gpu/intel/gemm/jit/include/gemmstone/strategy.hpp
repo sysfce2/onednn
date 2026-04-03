@@ -99,7 +99,7 @@ struct MatrixAddressingStrategy {
                                , noCoalesce(false)
                                , pad0(0) {}
 
-    void preflight(ngen::HW hw);
+    void preflight(ngen::PF pf);
     void forceA64();
     void assignSurface(uint8_t index) { if (!base.isStateless()) base.setIndex(index); }
 
@@ -163,7 +163,7 @@ struct CommonStrategy {
     bool systolicAvailable = false;             // True if systolic array present.
     bool avoidIncConflicts = true;              // If true, duplicate address increments across banks to avoid bundle conflicts.
     bool isDSLGenerator = false;
-    ngen::HW raHW = ngen::HW::Unknown;          // Pretend to be a different GPU for register allocation purposes.
+    ngen::PF raHW = ngen::PF::Unknown;          // Pretend to be a different GPU for register allocation purposes.
     ngen::ThreadArbitrationMode arbitrationMode
         = ngen::ThreadArbitrationMode::Default; // Thread arbitration policy to use.
     int activeThreads = 0;                      // # of active threads (0 = dynamic).
@@ -172,8 +172,8 @@ struct CommonStrategy {
                                     ZPAD(B, 2)
 
     CommonStrategy() = default;
-    CommonStrategy(ngen::HW hw, int stepping = 0);
-    void preflight(ngen::HW hw, const CommonProblem &problem);
+    CommonStrategy(ngen::PF pf, int stepping = 0);
+    void preflight(ngen::PF pf, const CommonProblem &problem);
 };
 
 // Strategy parameters for GEMM kernels.
@@ -317,7 +317,7 @@ struct GEMMStrategyPOD : public CommonStrategy {
                                     ZPAD(O, 3)
 
     GEMMStrategyPOD() = default;
-    GEMMStrategyPOD(ngen::HW hw, int stepping = 0) : CommonStrategy(hw, stepping) {}
+    GEMMStrategyPOD(ngen::PF pf, int stepping = 0) : CommonStrategy(pf, stepping) {}
 };
 
 #undef ZPAD
@@ -327,12 +327,12 @@ struct GEMMStrategy : public GEMMStrategyPOD
     std::vector<MatrixAddressingStrategy> binary; // Strategies for accessing binary postop data.
 
     GEMMStrategy() = default;
-    GEMMStrategy(ngen::HW hw, int stepping = 0) : GEMMStrategyPOD(hw, stepping) {}
+    GEMMStrategy(ngen::PF pf, int stepping = 0) : GEMMStrategyPOD(pf, stepping) {}
 
-    void preflight(ngen::HW hw, const GEMMProblem &problem);
-    bool minimize(ngen::HW hw, const GEMMProblem &problem);
+    void preflight(ngen::PF pf, const GEMMProblem &problem);
+    bool minimize(ngen::PF pf, const GEMMProblem &problem);
 
-    void trimKChain(ngen::HW hw, int k, const GEMMProblem &problem);
+    void trimKChain(ngen::PF pf, int k, const GEMMProblem &problem);
 
     int wgTile(LoopType l)                            const { return unroll[l] * wg[l]; }
 

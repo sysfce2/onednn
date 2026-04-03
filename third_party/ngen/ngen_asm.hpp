@@ -154,7 +154,7 @@ inline void Label::outputText(std::ostream &str, PrintDetail detail, LabelManage
 
 struct NoOperand {
     static const bool emptyOp = true;
-    void fixup(HW hw, int esize, int ewidth, DataType defaultType, int srcN, int arity) const {}
+    void fixup(PF pf, int esize, int ewidth, DataType defaultType, int srcN, int arity) const {}
     constexpr DataType getType() const { return DataType::invalid; }
     constexpr bool isScalar() const { return true; }
 
@@ -368,13 +368,14 @@ bool AsmInstruction::getOperandRegion(autoswsb::DependencyRegion &region, int op
     const AsmOperand &operand = (opNum < 0) ? dst : src[opNum];
     RegData rd;
     auto hw = region.hw;
+    auto pf = region.pf;
 
     switch (operand.type) {
         case AsmOperand::Type::reg:    rd = operand.reg; break;
         case AsmOperand::Type::ereg:   rd = operand.ereg.getBase(); break;
         case AsmOperand::Type::range:
             if (!operand.range.isValid()) return false;
-            region = DependencyRegion(hw, operand.range);
+            region = DependencyRegion(pf, operand.range);
             return true;
         case AsmOperand::Type::none:
             if (hw >= HW::Xe3 && (op == Opcode::send || op == Opcode::sendc) && opNum == 1
@@ -383,14 +384,14 @@ bool AsmInstruction::getOperandRegion(autoswsb::DependencyRegion &region, int op
                 auto desc = static_cast<MessageDescriptor>(uint32_t(static_cast<uint64_t>(src[3].imm)));
                 auto sreg = src[0].reg.getIndirectReg();
                 sreg.setRegion(1, 1, 0);
-                region = DependencyRegion(hw, desc.parts.messageLen, sreg);
+                region = DependencyRegion(pf, desc.parts.messageLen, sreg);
                 return true;
             }
             if ((op == Opcode::sendg || op == Opcode::sendgc) && opNum == 1
                     && src[0].type == AsmOperand::Type::reg && src[0].reg.isIndirect()) {
                 auto sreg = src[0].reg.getIndirectReg();
                 sreg.setRegion(1, 1, 0);
-                region = DependencyRegion(hw, ext >> 8, sreg);
+                region = DependencyRegion(pf, ext >> 8, sreg);
                 return true;
             }
             return false;
@@ -428,7 +429,7 @@ bool AsmInstruction::getOperandRegion(autoswsb::DependencyRegion &region, int op
         else if (len == -1)
             region = DependencyRegion();
         else
-            region = DependencyRegion(hw, GRFRange(rd.getBase(), len));
+            region = DependencyRegion(pf, GRFRange(rd.getBase(), len));
     } else if (op == Opcode::sendg || op == Opcode::sendgc || op == Opcode::sendgx || op == Opcode::sendgxc) {
         if (opNum == -1 && !rd.isNull() && src[4].type == AsmOperand::Type::imm) {
             SendgMessageDescriptor desc;
@@ -438,9 +439,9 @@ bool AsmInstruction::getOperandRegion(autoswsb::DependencyRegion &region, int op
             if (len == -1)
                 region = DependencyRegion();
             else
-                region = DependencyRegion(hw, GRFRange(rd.getBase(), len));
+                region = DependencyRegion(pf, GRFRange(rd.getBase(), len));
         } else
-            region = DependencyRegion(hw, mod.getExecSize(), rd);
+            region = DependencyRegion(pf, mod.getExecSize(), rd);
     } else if (op == Opcode::dpas || op == Opcode::dpasw) {
         unsigned sdepth = ext >> 8;
         unsigned rcount = ext & 0xFF;
@@ -457,9 +458,9 @@ bool AsmInstruction::getOperandRegion(autoswsb::DependencyRegion &region, int op
             default: return false;
         }
 
-        region = DependencyRegion(hw, GRFRange(operand.reg.getBase(), len));
+        region = DependencyRegion(pf, GRFRange(operand.reg.getBase(), len));
     } else
-        region = DependencyRegion(hw, mod.getExecSize(), rd);
+        region = DependencyRegion(pf, mod.getExecSize(), rd);
 
     return true;
 }
@@ -469,7 +470,7 @@ bool AsmInstruction::getCModDepRegion(autoswsb::DependencyRegion &region) const
     if (mod.getCMod() == ConditionModifier::none)
         return false;
 
-    region = autoswsb::DependencyRegion(region.hw, 1, mod.getFlagReg());
+    region = autoswsb::DependencyRegion(region.pf, 1, mod.getFlagReg());
     return true;
 }
 
@@ -481,14 +482,14 @@ class AsmCodeGenerator {
 private:
 #include "ngen_compiler_fix.hpp"
 public:
-    explicit AsmCodeGenerator(Product product_) : hardware(getCore(product_.family)), product(product_), defaultOutput{nullptr},
+    explicit AsmCodeGenerator(Product product_) : hardware(getCore(product_.family)), pf(product_.family), product(product_), defaultOutput{nullptr},
                                                   lfsr{this}, shfl{this},
                                                   sync{this}, load{this}, store{this}, atomic{this}
     {
-        isGen12 = (hardware >= HW::Gen12LP);
+        isGen12 = (pf >= PF::XeLP);
         _workaround_();
         streamStack.push_back(new InstructionStream());
-        useEfficient64Bit = (hardware >= HW::XE3P_35_10);
+        useEfficient64Bit = (hardware >= HW::Xe3P);
     }
 
     explicit AsmCodeGenerator(HW hardware_, int stepping_ = 0) : AsmCodeGenerator({genericProductFamily(hardware_), 0, PlatformType::Unknown}) {}
@@ -558,6 +559,7 @@ protected:
     };
 
     HW hardware;
+    PF pf;
     Product product;
     bool isGen12;
     int declaredGRFs = 128;
@@ -657,19 +659,19 @@ private:
             opSendg(op, mod, sf, dst, GRFRange(src0.getBase(), src0Len), NullRegister(), uniformizeInd(ind0), uniformizeInd(ind1), desc);
     }
     void opDpas(Opcode op, DataType defaultType, const InstructionModifier &mod, int sdepth, int rcount, RegData dst, RegData src0, RegData src1, RegData src2) {
-        dst.fixup(hardware, 1, 0, defaultType, -1, 3);
-        src0.fixup(hardware, 1, 0, defaultType, 0, 3);
-        src1.fixup(hardware, 1, 0, defaultType, 1, 3);
-        src2.fixup(hardware, 1, 0, defaultType, 2, 3);
+        dst.fixup(pf, 1, 0, defaultType, -1, 3);
+        src0.fixup(pf, 1, 0, defaultType, 0, 3);
+        src1.fixup(pf, 1, 0, defaultType, 1, 3);
+        src2.fixup(pf, 1, 0, defaultType, 2, 3);
         (void) streamStack.back()->append(op, (sdepth << 8) | rcount, mod | defaultModifier, &labelManager, dst, src0, src1, src2);
     }
     void opBdpas(Opcode op, DataType defaultType, const InstructionModifier &mod, int sdepth, int rcount, RegData dst, RegData src0, RegData src1, RegData src2, RegData src3, RegData src4) {
-        dst.fixup(hardware, 1, 0, defaultType, -1, 3);
-        src0.fixup(hardware, 1, 0, defaultType, 0, 3);
-        src1.fixup(hardware, 1, 0, defaultType, 1, 3);
-        src2.fixup(hardware, 1, 0, defaultType, 2, 3);
-        src3.fixup(hardware, 1, 0, DataType::ub, 3, 5);
-        src4.fixup(hardware, 1, 0, DataType::ub, 4, 5);
+        dst.fixup(pf, 1, 0, defaultType, -1, 3);
+        src0.fixup(pf, 1, 0, defaultType, 0, 3);
+        src1.fixup(pf, 1, 0, defaultType, 1, 3);
+        src2.fixup(pf, 1, 0, defaultType, 2, 3);
+        src3.fixup(pf, 1, 0, DataType::ub, 3, 5);
+        src4.fixup(pf, 1, 0, DataType::ub, 4, 5);
         (void) streamStack.back()->append(op, (sdepth << 8) | rcount, mod | defaultModifier, &labelManager, dst, src0, src1, src2, src3, src4);
     }
     template <typename D, typename S0> void opCall(Opcode op, const InstructionModifier &mod, D dst, S0 src0) {
@@ -1074,33 +1076,33 @@ public:
     }
     template <typename DT = void>
     void mac(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, SourceLocation loc = {}) {
-        if (hardware >= HW::XE3P_35_10) unsupported();
+        if (hardware >= HW::Xe3P) unsupported();
         opX(Opcode::mac, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void mac(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1, SourceLocation loc = {}) {
-        if (hardware >= HW::XE3P_35_10) unsupported();
+        if (hardware >= HW::Xe3P) unsupported();
         opX(Opcode::mac, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void mach(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, SourceLocation loc = {}) {
-        if (hardware >= HW::XE3P_35_10) unsupported();
+        if (hardware >= HW::Xe3P) unsupported();
         opX(Opcode::mach, getDataType<DT>(), (hardware >= HW::XeHPC) ? mod : (mod | AccWrEn), dst, src0, src1);
     }
     template <typename DT = void>
     void mach(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1, SourceLocation loc = {}) {
-        if (hardware >= HW::XE3P_35_10) unsupported();
+        if (hardware >= HW::Xe3P) unsupported();
         opX(Opcode::mach, getDataType<DT>(), (hardware >= HW::XeHPC) ? mod : (mod | AccWrEn), dst, src0, src1);
     }
     template <typename DT = void>
     void macl(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, SourceLocation loc = {}) {
-        if (hardware >= HW::XE3P_35_10) unsupported();
+        if (hardware >= HW::Xe3P) unsupported();
         if (hardware < HW::Gen10) unsupported();
         opX((hardware >= HW::XeHPC) ? Opcode::macl : Opcode::mach, getDataType<DT>(), mod, dst, src0, src1);
     }
     template <typename DT = void>
     void macl(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1, SourceLocation loc = {}) {
-        if (hardware >= HW::XE3P_35_10) unsupported();
+        if (hardware >= HW::Xe3P) unsupported();
         if (hardware < HW::Gen10) unsupported();
         opX((hardware >= HW::XeHPC) ? Opcode::macl : Opcode::mach, getDataType<DT>(), mod, dst, src0, src1);
     }
@@ -1863,7 +1865,7 @@ void AsmCodeGenerator::getCode(std::ostream &out)
 {
     finalize();
 
-    autoswsb::BasicBlockList analysis = autoswsb::autoSWSB(hardware, declaredGRFs, streamStack.back()->buffer, cancelAutoSWSB_.get());
+    autoswsb::BasicBlockList analysis = autoswsb::autoSWSB(pf, declaredGRFs, streamStack.back()->buffer, cancelAutoSWSB_.get());
     std::multimap<int32_t, autoswsb::SyncInsertion*> syncs;      // Syncs inserted by auto-SWSB.
     std::multimap<int32_t, autoswsb::DummyMovInsertion*> movs;   // Dummy moves inserted by auto-SWSB.
 
@@ -1942,10 +1944,10 @@ void AsmCodeGenerator::opX(Opcode op, DataType defaultType, const InstructionMod
 #endif
 
     auto ewidth = getExecWidth({defaultType, dst.getType(), src0.getType(), src1.getType(), src2.getType()});
-    dst.fixup(hardware,  esize, ewidth, defaultType, -1, arity);
-    src0.fixup(hardware, esize, ewidth, defaultType, 0, arity);
-    src1.fixup(hardware, esize, ewidth, defaultType, 1, arity);
-    src2.fixup(hardware, esize, ewidth, defaultType, 2, arity);
+    dst.fixup(pf,  esize, ewidth, defaultType, -1, arity);
+    src0.fixup(pf, esize, ewidth, defaultType, 0, arity);
+    src1.fixup(pf, esize, ewidth, defaultType, 1, arity);
+    src2.fixup(pf, esize, ewidth, defaultType, 2, arity);
 
     streamStack.back()->append(op, ext, emod, &labelManager, dst, src0, src1, src2);
 }

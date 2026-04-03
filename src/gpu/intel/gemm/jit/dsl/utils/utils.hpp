@@ -158,29 +158,27 @@ inline const name_map_t<ngen::HW> &get_name_map() {
             {ngen::HW::XeHPC, "XeHPC"},
             {ngen::HW::Xe2, "Xe2"},
             {ngen::HW::Xe3, "Xe3"},
-            {ngen::HW::XE3P_35_10, "XE3P_35_10"},
-            {ngen::HW::XE3P_35_11, "XE3P_35_11"},
-            {ngen::HW::XE3P_UNKNOWN, "XE3P_UNKNOWN"},
+            {ngen::HW::Xe3P, "Xe3P"},
     };
     return names;
 }
 template <>
-inline const name_map_t<ngen::ProductFamily> &get_name_map() {
-    static const name_map_t<ngen::ProductFamily> names {
-            {ngen::ProductFamily::Unknown, "unknown"},
-            {ngen::ProductFamily::GenericGen9, "Gen9"},
-            {ngen::ProductFamily::GenericGen10, "Gen10"},
-            {ngen::ProductFamily::GenericGen11, "Gen11"},
-            {ngen::ProductFamily::GenericXeLP, "XeLP"},
-            {ngen::ProductFamily::GenericXeHP, "XeHP"},
-            {ngen::ProductFamily::GenericXeHPG, "XeHPG"},
-            {ngen::ProductFamily::DG2, "DG2"},
-            {ngen::ProductFamily::MTL, "MTL"},
-            {ngen::ProductFamily::ARL, "ARL"},
-            {ngen::ProductFamily::GenericXeHPC, "XeHPC"},
-            {ngen::ProductFamily::PVC, "PVC"},
-            {ngen::ProductFamily::GenericXe2, "Xe2"},
-            {ngen::ProductFamily::GenericXe3, "Xe3"},
+inline const name_map_t<ngen::PF> &get_name_map() {
+    static const name_map_t<ngen::PF> names {
+            {ngen::PF::Unknown, "unknown"},
+            {ngen::PF::GenericGen9, "Gen9"},
+            {ngen::PF::GenericGen10, "Gen10"},
+            {ngen::PF::GenericGen11, "Gen11"},
+            {ngen::PF::GenericXeLP, "XeLP"},
+            {ngen::PF::GenericXeHP, "XeHP"},
+            {ngen::PF::GenericXeHPG, "XeHPG"},
+            {ngen::PF::DG2, "DG2"},
+            {ngen::PF::MTL, "MTL"},
+            {ngen::PF::ARL, "ARL"},
+            {ngen::PF::GenericXeHPC, "XeHPC"},
+            {ngen::PF::PVC, "PVC"},
+            {ngen::PF::GenericXe2, "Xe2"},
+            {ngen::PF::GenericXe3, "Xe3"},
     };
     return names;
 }

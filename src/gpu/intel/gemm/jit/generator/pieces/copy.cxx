@@ -117,7 +117,7 @@ void Generator<hw>::copyRegisters(Type Ts, Type Td, const RegisterLayout &layout
     auto RegisterBlock::*ny = sCM ? &RegisterBlock::nc : &RegisterBlock::nr;
 
     // Accumulate copy pseudo-instructions.
-    CopyPlan plan(hw, strategy.systolicAvailable);
+    CopyPlan plan(getProductFamily(), strategy.systolicAvailable);
 
     for (auto &sblock : layoutSrc) {
     for (int eoffY = 0; eoffY < sblock.*ny; eoffY++) {
@@ -163,7 +163,7 @@ void Generator<hw>::copyRegisters(Type Ts, Type Td, const RegisterLayout &layout
         if (alpha.fixed())
             plan.append(Opcode::mov, n, mod, dOp, sOp);
         else
-            plan.append(Opcode::mul, n, mod, dOp, sOp, alpha_real.getRegAvoiding(hw, sOp.ngen()));
+            plan.append(Opcode::mul, n, mod, dOp, sOp, alpha_real.getRegAvoiding(getProductFamily(), sOp.ngen()));
 
         eoffX += n;
     } /* eoffX loop */

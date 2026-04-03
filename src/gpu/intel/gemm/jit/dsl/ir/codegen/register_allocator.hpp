@@ -28,7 +28,7 @@ namespace ir {
 // Register Allocator Wrapper to allow for custom checks.
 class reg_allocator_t {
 public:
-    reg_allocator_t(ngen::HW hw) : ra(hw) {}
+    reg_allocator_t(ngen::PF pf) : ra(pf) {}
     ~reg_allocator_t()
 #if GEMMSTONE_ASSERTIONS
     {
@@ -39,6 +39,7 @@ public:
 #endif
 
     ngen::HW hardware() const { return ra.hardware(); }
+    ngen::PF productFamily() const { return ra.productFamily(); }
 
     ngen::GRFRange alloc_range(int nregs,
             ngen::Bundle base_bundle = ngen::Bundle(),

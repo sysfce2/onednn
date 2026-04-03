@@ -74,42 +74,50 @@ inline data_type_t convert_ngen_type_to_dnnl(ngen::DataType dt) {
     return dt_out;
 }
 
-inline ngen::HW convert_dnnl_arch_to_ngen(compute::gpu_arch_t gpu_arch) {
+inline ngen::PF convert_dnnl_arch_to_ngen(compute::gpu_arch_t gpu_arch) {
     switch (gpu_arch) {
-        case compute::gpu_arch_t::xe_lp: return ngen::HW::XeLP;
-        case compute::gpu_arch_t::xe_hp: return ngen::HW::XeHP;
-        case compute::gpu_arch_t::xe_hpg: return ngen::HW::XeHPG;
-        case compute::gpu_arch_t::xe_hpc: return ngen::HW::XeHPC;
-        case compute::gpu_arch_t::xe2: return ngen::HW::Xe2;
-        case compute::gpu_arch_t::xe3: return ngen::HW::Xe3;
-        case compute::gpu_arch_t::xe3p_35_10: return ngen::HW::XE3P_35_10;
-        case compute::gpu_arch_t::xe3p_35_11: return ngen::HW::XE3P_35_11;
+        case compute::gpu_arch_t::xe_lp: return ngen::PF::XeLP;
+        case compute::gpu_arch_t::xe_hp: return ngen::PF::XeHP;
+        case compute::gpu_arch_t::xe_hpg: return ngen::PF::XeHPG;
+        case compute::gpu_arch_t::xe_hpc: return ngen::PF::XeHPC;
+        case compute::gpu_arch_t::xe2: return ngen::PF::Xe2;
+        case compute::gpu_arch_t::xe3: return ngen::PF::Xe3;
+        case compute::gpu_arch_t::xe3p_35_10: return ngen::PF::XE3P_35_10;
+        case compute::gpu_arch_t::xe3p_35_11: return ngen::PF::XE3P_35_11;
         case compute::gpu_arch_t::xe3p_35_unknown:
-            return ngen::HW::XE3P_UNKNOWN;
-        case compute::gpu_arch_t::unknown: return ngen::HW::Unknown;
+            return ngen::PF::XE3P_UNKNOWN;
+        case compute::gpu_arch_t::unknown: return ngen::PF::Unknown;
     }
-    return ngen::HW::Unknown;
+    return ngen::PF::Unknown;
 }
 
-inline compute::gpu_arch_t convert_ngen_arch_to_dnnl(ngen::HW gpu_arch) {
-    switch (gpu_arch) {
-        case ngen::HW::XeLP: return compute::gpu_arch_t::xe_lp;
-        case ngen::HW::XeHP: return compute::gpu_arch_t::xe_hp;
-        case ngen::HW::XeHPG: return compute::gpu_arch_t::xe_hpg;
-        case ngen::HW::XeHPC: return compute::gpu_arch_t::xe_hpc;
-        case ngen::HW::Xe2: return compute::gpu_arch_t::xe2;
-        case ngen::HW::Xe3: return compute::gpu_arch_t::xe3;
-        case ngen::HW::XE3P_35_10: return compute::gpu_arch_t::xe3p_35_10;
-        case ngen::HW::XE3P_35_11: return compute::gpu_arch_t::xe3p_35_11;
-        case ngen::HW::XE3P_UNKNOWN:
+inline compute::gpu_arch_t convert_ngen_arch_to_dnnl(ngen::PF pf) {
+    switch (pf) {
+        case ngen::PF::XeLP: return compute::gpu_arch_t::xe_lp;
+        case ngen::PF::XeHP: return compute::gpu_arch_t::xe_hp;
+        case ngen::PF::DG2:
+        case ngen::PF::MTL:
+        case ngen::PF::ARL:
+        case ngen::PF::XeHPG: return compute::gpu_arch_t::xe_hpg;
+        case ngen::PF::PVC:
+        case ngen::PF::PVCVG:
+        case ngen::PF::XeHPC: return compute::gpu_arch_t::xe_hpc;
+        case ngen::PF::BMG:
+        case ngen::PF::LNL:
+        case ngen::PF::Xe2: return compute::gpu_arch_t::xe2;
+        case ngen::PF::Xe3: return compute::gpu_arch_t::xe3;
+        case ngen::PF::Xe3P:
+        case ngen::PF::XE3P_35_10: return compute::gpu_arch_t::xe3p_35_10;
+        case ngen::PF::XE3P_35_11: return compute::gpu_arch_t::xe3p_35_11;
+        case ngen::PF::XE3P_UNKNOWN:
             return compute::gpu_arch_t::xe3p_35_unknown;
-        case ngen::HW::Gen9:
-        case ngen::HW::Gen10:
-        case ngen::HW::Gen11:
+        case ngen::PF::Gen9:
+        case ngen::PF::Gen10:
+        case ngen::PF::Gen11:
             // Gen9, Gen10, Gen11 are not supported anymore. Included
             // here instead of default to emit warnings at this spot
             // when new architectures are added.
-        case ngen::HW::Unknown: return compute::gpu_arch_t::unknown;
+        case ngen::PF::Unknown: return compute::gpu_arch_t::unknown;
     }
     return compute::gpu_arch_t::unknown;
 }

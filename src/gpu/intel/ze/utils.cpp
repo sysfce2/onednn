@@ -169,7 +169,7 @@ status_t init_gpu_hw_info(impl::engine_t *engine, ze_device_handle_t device,
     ngen::Product product = LevelZeroCodeGenerator<HW::Unknown>::detectHWInfo(
             context, device);
 
-    gpu_arch = jit::convert_ngen_arch_to_dnnl(ngen::getCore(product.family));
+    gpu_arch = jit::convert_ngen_arch_to_dnnl(product.family);
     std::memcpy(&product_, &product, sizeof(ngen::Product));
 
     mayiuse_systolic = false;

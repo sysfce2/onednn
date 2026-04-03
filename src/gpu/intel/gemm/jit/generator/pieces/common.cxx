@@ -91,7 +91,7 @@ void Generator<hw>::duplicateScalar(SubregisterPair &val, CommonState &state)
     if (val.isDuplicated()) return;
     if (reg0.isInvalid()) return;
 
-    auto bundle = Bundle::locate(hw, reg0);
+    auto bundle = Bundle::locate(getProductFamily(), reg0);
     auto reg1 = state.ra.alloc_sub(reg0.getType(), Bundle(bundle.bank_id ^ 1, Bundle::any));
 
     mov(1, reg1, reg0);
@@ -660,7 +660,7 @@ void Generator<hw>::initState(const CommonProblem &problem, const CommonStrategy
 
     interface.requireNoPreemption();
 
-    if (strategy.raHW != hw)
+    if (strategy.raHW != getProductFamily())
         state.ra = RegisterAllocator(strategy.raHW);
 
     requireGRF(strategy.GRFs);

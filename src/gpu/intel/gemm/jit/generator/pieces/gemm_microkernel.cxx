@@ -26,11 +26,12 @@ using namespace ngen::utils;
 template <HW hw>
 void Generator<hw>::gemmMicrokernel(GEMMProblem problem, GEMMStrategy strategy, const ngen::InterfaceHandler &interface_)
 {
-    GEMMState state(hw, strategy);
+    auto pf = getProductFamily();
+    GEMMState state(pf, strategy);
 
     interface = interface_;
 
-    problem.autoTypeConversions(hw, strategy.systolic);
+    problem.autoTypeConversions(pf, strategy.systolic);
     gemmInitState(problem, strategy, state);
     for (int q = 0; q < 2; q++)
         state.ra.safeRelease(state.emulate.temp[q]);
@@ -200,9 +201,10 @@ microkernel::Package Generator<hw>::gemmMicrokernelPackage(const GEMMProblem &pr
 {
     using namespace microkernel;
     Package package;
+    auto pf = getProductFamily();
 
     auto problem = problem_;
-    problem.autoTypeConversions(hw, strategy.systolic);
+    problem.autoTypeConversions(pf, strategy.systolic);
 
     gemmMicrokernel(problem, strategy, interface_);
 
@@ -307,7 +309,7 @@ microkernel::Package Generator<hw>::gemmMicrokernelPackage(const GEMMProblem &pr
     }
 
     auto slmSize = std::max(gemmSLMSize(hw, problem, strategy, true),
-                            gemmPerKSLMSize(hw, problem, strategy) * strategy.wg[LoopK]);
+                            gemmPerKSLMSize(getProductFamily(), problem, strategy) * strategy.wg[LoopK]);
 
     auto effLoopM = !transposeC ? LoopM : LoopN;
     auto effLoopN = !transposeC ? LoopN : LoopM;

@@ -269,23 +269,23 @@ struct GEMMProblem : public CommonProblem {
     bool needsBSums() const { return sumB || (aOffset == ABOffset::Calc && !earlyDequantizeA() && !quantized2DA()); }
 
 
-    bool nativeBDPAS(ngen::HW hw) const {
+    bool nativeBDPAS(ngen::PF pf) const {
         return ((Ta.isF4() || Ta.isF8() || Ta == Type::f16 || Ta == Type::bf16) &&
                 (Tb.isF4() || Tb.isF8() || Tb == Type::f16 || Tb == Type::bf16) && 
-        hw >= ngen::Core::XE3P_35_10);
+        pf >= ngen::PF::XE3P_35_10);
     }
-    bool forceLateQuant(ngen::HW hw, int minOPCount) const {
-        bool fp4_fp8_dpas = ((Ta.isF8() && Tb.isF8()) || (Ta.isF4() && Tb.isF4())) && nativeBDPAS(hw);
-        return fp4_fp8_dpas && ((aScale2D() && !preferBDPAS(hw) && aqGroupK % minOPCount == 0)
-            || (bScale2D() && !preferBDPAS(hw) && bqGroupK % minOPCount == 0));
+    bool forceLateQuant(ngen::PF pf, int minOPCount) const {
+        bool fp4_fp8_dpas = ((Ta.isF8() && Tb.isF8()) || (Ta.isF4() && Tb.isF4())) && nativeBDPAS(pf);
+        return fp4_fp8_dpas && ((aScale2D() && !preferBDPAS(pf) && aqGroupK % minOPCount == 0)
+            || (bScale2D() && !preferBDPAS(pf) && bqGroupK % minOPCount == 0));
     }
-    bool forceUpconvertQuant(ngen::HW hw) const {
+    bool forceUpconvertQuant(ngen::PF pf) const {
         // Cover cases where scale group < ksys by upconverting, using normal dpas and scale routines.
-        return nativeBDPAS(hw) && Ta.isF4() && Tb.isF4() && ((aScale2D() && !preferBDPAS(hw) && aqGroupK % 64 != 0)
-            || (bScale2D() && !preferBDPAS(hw) && bqGroupK % 64 != 0));
+        return nativeBDPAS(pf) && Ta.isF4() && Tb.isF4() && ((aScale2D() && !preferBDPAS(pf) && aqGroupK % 64 != 0)
+            || (bScale2D() && !preferBDPAS(pf) && bqGroupK % 64 != 0));
     }
-    bool preferBDPAS(ngen::HW hw) const {
-        bool useBDPAS = (bdpasEnabled && nativeBDPAS(hw) && (aScale2D() || bScale2D()));
+    bool preferBDPAS(ngen::PF pf) const {
+        bool useBDPAS = (bdpasEnabled && nativeBDPAS(pf) && (aScale2D() || bScale2D()));
         if (aScale2D()) useBDPAS &= (Ta_scale == Type::f8_e8m0) && (aqGroupK % 32 == 0);
         if (bScale2D()) useBDPAS &= (Tb_scale == Type::f8_e8m0) && (bqGroupK % 32 == 0);
         return useBDPAS;
@@ -309,7 +309,7 @@ struct GEMMProblem : public CommonProblem {
     bool isLegalAAlignment(int align, int unrollM) const { return (A.layout != MatrixLayout::N) || ((unrollM * Ta) % align == 0); }
     bool isLegalBAlignment(int align, int unrollN) const { return (B.layout != MatrixLayout::T) || ((unrollN * Tb) % align == 0); }
 
-    inline void autoTypeConversions(ngen::HW hw, bool systolicAvailable);
+    inline void autoTypeConversions(ngen::PF pf, bool systolicAvailable);
     void transpose();
 
     std::string toString() const;
@@ -350,7 +350,7 @@ struct GEMMProblem : public CommonProblem {
 
 
 // Apply automatic internal type conversions to a problem.
-void GEMMProblem::autoTypeConversions(ngen::HW hw, bool systolicAvailable)
+void GEMMProblem::autoTypeConversions(ngen::PF pf, bool systolicAvailable)
 {
     using namespace ngen;
 
@@ -365,14 +365,14 @@ void GEMMProblem::autoTypeConversions(ngen::HW hw, bool systolicAvailable)
 
     if (Ta == Ta_ext.asSigned()) Ta = Ta_ext;
     if (Tb == Tb_ext.asSigned()) Tb = Tb_ext;
-    if (hw < HW::XE3P_35_10 || !systolicAvailable)
+    if (pf < PF::XE3P_35_10 || !systolicAvailable)
     {
         if (Ta.isF8()) Ta = Type::f16;
         if (Tb.isF8()) Tb = Type::f16;
     }
-    if (hw < HW::XE3P_35_11 || !systolicAvailable || forceUpconvertQuant(hw))
+    if (pf < PF::XE3P_35_11 || !systolicAvailable || forceUpconvertQuant(pf))
     {
-        if ( hw == HW::XE3P_35_10){
+        if (pf == PF::XE3P_35_10){
             if (Ta.isF4()) Ta = Type::bf8;
             if (Tb.isF4()) Tb = Type::bf8;
         } else {
@@ -386,7 +386,7 @@ void GEMMProblem::autoTypeConversions(ngen::HW hw, bool systolicAvailable)
         if (Tb == Type::f16) Tb = Type::f32;
     }
 
-    if (hw < HW::XeHP || (hw > HW::XeHP && !systolicAvailable)) {
+    if (pf < PF::GenericXeHP || (pf > PF::GenericXeHP && !systolicAvailable)) {
         if (Ta == Type::bf16) Ta = Type::f32;
         if (Tb == Type::bf16) Tb = Type::f32;
     }

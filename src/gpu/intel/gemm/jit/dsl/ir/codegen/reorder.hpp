@@ -49,7 +49,7 @@ struct copy_plan_t : gemmstone::CopyPlan {
     using gemmstone::CopyPlan::newTemp;
 
     copy_plan_t(reg_allocator_t &ra, bool systolic_support)
-        : CopyPlan(ra.hardware(), systolic_support), ra_(ra) {}
+        : CopyPlan(ra.productFamily(), systolic_support), ra_(ra) {}
 
     ngen::HW hw() const { return CopyPlan::hw; }
 
@@ -140,7 +140,7 @@ void align_src_dst_offset(GeneratorT *host, ngen_register_scope_t &scope,
     auto new_src_type = src.type();
     bool needs_stride_alignment = false;
     bool align_bf = is_bf_to_f && src.hs();
-    if (scope.hw() >= ngen::HW::XE3P_35_10 && (align_stride || align_bf)) {
+    if (scope.hw() >= ngen::HW::Xe3P && (align_stride || align_bf)) {
         auto src_stride_bytes = src.hs() * src_type_size;
         auto dst_stride_bytes = dst.hs() * dst_type_size;
         needs_stride_alignment = (src_stride_bytes != dst_stride_bytes);

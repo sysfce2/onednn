@@ -123,7 +123,7 @@ status_t gen_desc_t::finalize(const char *tags) {
     problem_.CO.setAlignment(problem_.Tco.paddedSize());
 
     // Parse strategy string.
-    strategy_ = GEMMStrategy(hw_, stepping_);
+    strategy_ = GEMMStrategy(pf_, stepping_);
 #ifdef DNNL_DEV_MODE
     std::string ovr_strategy;
     ovr_strategy = gpu_utils::dev_getenv("GEMM_KERNEL", ovr_strategy);
@@ -156,7 +156,7 @@ status_t gen_desc_t::finalize(const char *tags) {
             problem_.C.setAlignment(
                     problem_.C.defaultAlignment(problem_.Tc_ext));
 
-        strategy_ = GEMMStrategy(hw_, stepping_);
+        strategy_ = GEMMStrategy(pf_, stepping_);
         ss >> strategy_.unroll[LoopM];
         ss >> strategy_.unroll[LoopN];
 
@@ -166,7 +166,7 @@ status_t gen_desc_t::finalize(const char *tags) {
         problem_.beta = stringToScalar(val);
 
         ovr_strategy = ss.str().substr(ss.tellg()); // remaining string
-        parseStrategy(ovr_strategy.c_str(), hw_, problem_, strategy_);
+        parseStrategy(ovr_strategy.c_str(), pf_, problem_, strategy_);
 
         // TODO: override derived values in aux_params_ in a way that's
         // consistent with the kernel evaluator (typically requires extra
@@ -187,7 +187,7 @@ status_t gen_desc_t::finalize(const char *tags) {
 #endif
         strategy_.unroll[LoopM] = entry_->driverInfo.unroll[LoopM];
         strategy_.unroll[LoopN] = entry_->driverInfo.unroll[LoopN];
-        parseStrategy(entry_->strategy, hw_, problem_, strategy_);
+        parseStrategy(entry_->strategy, pf_, problem_, strategy_);
         modifyStrategy(strategy_, aux_params_);
 #ifdef DNNL_DEV_MODE
     }
@@ -205,10 +205,10 @@ status_t gen_desc_t::finalize(const char *tags) {
             aux_params_.k0 = utils::rnd_up(aux_params_.k0, problem_.bqGroupK);
     }
 
-    if (hw_ == ngen::HW::Xe2 || hw_ == ngen::HW::Xe3) {
+    if (pf_ == ngen::PF::GenericXe2 || pf_ == ngen::PF::GenericXe3) {
         // Use XeHPC register banking on Xe2/Xe3, in order
         // to successfully reuse XeHPC strategies.
-        strategy_.raHW = ngen::HW::XeHPC;
+        strategy_.raHW = ngen::PF::XeHPC;
 
         // Bump up alignments to 16 bytes for block 2D if available.
         bool block_2d_a = false, block_2d_b = false;
@@ -222,10 +222,10 @@ status_t gen_desc_t::finalize(const char *tags) {
             problem_.B.setAlignment(nstl::max<int>(problem_.B.alignment, 16));
     }
 
-    if (utils::one_of(hw_, ngen::HW::XE3P_35_10, ngen::HW::XE3P_35_11,
-                ngen::HW::XE3P_UNKNOWN)) {
+    if (utils::one_of(pf_, ngen::PF::XE3P_35_10, ngen::PF::XE3P_35_11,
+                ngen::PF::XE3P_UNKNOWN)) {
         // Use XeHPC banking if reusing XeHPC strategies (legacy mode)
-        if (!efficient_64b_) strategy_.raHW = ngen::HW::XeHPC;
+        if (!efficient_64b_) strategy_.raHW = ngen::PF::XeHPC;
 
         // Disable named barriers to avoid simulator errors, allow fallback to pvc strategies.
         strategy_.namedBarriers[0] = 0;
@@ -304,10 +304,10 @@ status_t gen_desc_t::finalize(const char *tags) {
     strategy_.relaxedAccumulation |= relaxed_acc_;
     strategy_.systolicAvailable &= !disable_systolic_;
     if (problem_.needsAGroupSums() || problem_.needsBGroupSums())
-        problem_.autoTypeConversions(hw_, strategy_.systolicAvailable);
-    adjustStrategy(hw_, problem_, strategy_, tags);
+        problem_.autoTypeConversions(pf_, strategy_.systolicAvailable);
+    adjustStrategy(pf_, problem_, strategy_, tags);
     try {
-        strategy_.preflight(hw_, problem_);
+        strategy_.preflight(pf_, problem_);
     } catch (...) { return status::unimplemented; }
 
     // Check for legal 2D quantization group size.
@@ -319,35 +319,35 @@ status_t gen_desc_t::finalize(const char *tags) {
             return status::unimplemented;
     if (problem_.aScale2D()
             && problem_.aqGroupK
-                            % minOuterProductCount(hw_, problem_, strategy_)
+                            % minOuterProductCount(pf_, problem_, strategy_)
                     != 0) {
         if (!problem_.Ta.isF4() || !problem_.Tb.isF4())
             return status::unimplemented;
     }
     if (problem_.bScale2D()
             && problem_.bqGroupK
-                            % minOuterProductCount(hw_, problem_, strategy_)
+                            % minOuterProductCount(pf_, problem_, strategy_)
                     != 0) {
         if (!problem_.Ta.isF4() || !problem_.Tb.isF4())
             return status::unimplemented;
     }
 
     // TODO: Fix kChain handling with BDPAS.
-    if (problem_.preferBDPAS(hw_)) { strategy_.kChain = 1; }
+    if (problem_.preferBDPAS(pf_)) { strategy_.kChain = 1; }
 
     // If the M/N group size is equal to M or N, align up to a multiple of unroll size
     // XXX: Increase group size to a large value before aligning to increase reusability
     // TODO: Refactor M/N groups/thread setting to preserve MN group count.
     constexpr int perMNGroupSize = 1 << 24;
     if (problem_.aqGroupM == m_
-            && ((!problem_.forceGroupSumsA && !problem_.preferBDPAS(hw_))
+            && ((!problem_.forceGroupSumsA && !problem_.preferBDPAS(pf_))
                     || m_ > 1)) {
         problem_.aqGroupM = std::max(problem_.aqGroupM, perMNGroupSize);
         problem_.aqGroupM
                 = utils::rnd_up(problem_.aqGroupM, strategy_.unroll[LoopM]);
     }
     if (problem_.bqGroupN == n_
-            && ((!problem_.forceGroupSumsB && !problem_.preferBDPAS(hw_))
+            && ((!problem_.forceGroupSumsB && !problem_.preferBDPAS(pf_))
                     || n_ > 1)) {
         problem_.bqGroupN = std::max(problem_.bqGroupN, perMNGroupSize);
         problem_.bqGroupN
@@ -367,7 +367,7 @@ status_t gen_desc_t::finalize(const char *tags) {
 void gen_desc_t::update_driver_info() {
 #define ARCH_DISPATCH(arch) \
     case ngen::HW::arch: \
-        driver_info_ = gemm_kernel_generator_t<ngen::HW::arch>::driverInfo( \
+        driver_info_ = gemm_kernel_generator_t<ngen::HW::arch>::driverInfo(pf_,\
                 problem_, strategy_); \
         break;
 
@@ -378,9 +378,7 @@ void gen_desc_t::update_driver_info() {
         REG_XEHPC_ISA(ARCH_DISPATCH(XeHPC))
         REG_XE2_ISA(ARCH_DISPATCH(Xe2))
         REG_XE3_ISA(ARCH_DISPATCH(Xe3))
-        REG_XE3P_ISA(ARCH_DISPATCH(XE3P_35_10))
-        REG_XE3P_ISA(ARCH_DISPATCH(XE3P_35_11))
-        REG_XE3P_ISA(ARCH_DISPATCH(XE3P_UNKNOWN))
+        REG_XE3P_ISA(ARCH_DISPATCH(Xe3P))
         default:
             assert(!"Unsupported architecture");
             driver_info_ = entry_->driverInfo;
@@ -390,15 +388,17 @@ void gen_desc_t::update_driver_info() {
 }
 
 std::vector<const gemmstone::kcatalog::Entry *>
-gen_nocopy_desc_t::select_kernel(compute::gpu_arch_t arch, int stepping,
-        int eu_count, bool has_systolic, bool is_integrated, compute_mode mode,
-        const gemmstone::GEMMProblem &problem, float alpha, float beta, dim_t m,
-        dim_t n, dim_t k, dim_t lda, dim_t ldb, dim_t ldc, dim_t batch) {
+gen_nocopy_desc_t::select_kernel(compute::gpu_arch_t arch, ngen::PF pf,
+        int stepping, int eu_count, bool has_systolic, bool is_integrated,
+        compute_mode mode, const gemmstone::GEMMProblem &problem, float alpha,
+        float beta, dim_t m, dim_t n, dim_t k, dim_t lda, dim_t ldb,
+        dim_t ldc, dim_t batch) {
     using namespace ngen;
     using namespace kcatalog;
 
     arch_ = arch;
-    hw_ = convert_dnnl_arch_to_ngen(arch);
+    hw_ = ngen::getCore(pf);
+    pf_ = pf;
     stepping_ = stepping;
     m_ = m;
     n_ = n;
@@ -409,11 +409,9 @@ gen_nocopy_desc_t::select_kernel(compute::gpu_arch_t arch, int stepping,
 
     // Select a kernel from the catalog.
     std::vector<MatchParams> match_params;
-    MatchParams base(hw_, has_systolic, is_integrated, problem);
+    MatchParams base(hw_, pf_, has_systolic, is_integrated, problem);
     /* Reuse PVC strategies for legacy mode on Xe3p */
-    if (utils::one_of(hw_, ngen::HW::XE3P_35_10, ngen::HW::XE3P_35_11,
-                ngen::HW::XE3P_UNKNOWN)
-            && !efficient_64b_)
+    if (pf_ >= ngen::PF::GenericXe3P && !efficient_64b_)
         base.selector.hw = kcatalog::HWTagXeHPC;
 
     // By default gemmstone assumes that the accumulation type must be at least
@@ -607,7 +605,7 @@ status_t gen_nocopy_desc_t::finalize() {
 }
 
 status_t gen_xe_systolic_kernel_desc_t::select_kernel(compute::gpu_arch_t arch,
-        int stepping, int eu_count, bool is_integrated, int batch_dims,
+        ngen::PF pf, int stepping, int eu_count, bool is_integrated, int batch_dims,
         bool packed_c, bool trans_co, bool a_offset, bool b_offset,
         bool c_offset, bool bias, float alpha, float beta, data_type_t a_type,
         data_type_t b_type, data_type_t c_type, data_type_t ao_type,
@@ -618,7 +616,8 @@ status_t gen_xe_systolic_kernel_desc_t::select_kernel(compute::gpu_arch_t arch,
     using namespace kcatalog;
 
     arch_ = arch;
-    hw_ = convert_dnnl_arch_to_ngen(arch);
+    hw_ = ngen::getCore(pf);
+    pf_ = pf;
     stepping_ = stepping;
     m_ = m;
     n_ = n;
@@ -628,7 +627,7 @@ status_t gen_xe_systolic_kernel_desc_t::select_kernel(compute::gpu_arch_t arch,
     if (!utils::one_of(hw_, HW::XeHP, HW::XeHPG, HW::XeHPC, HW::Xe2, HW::Xe3))
         return status::unimplemented;
 
-    bool xehpc = (hw_ >= HW::XeHPC);
+    bool xehpc = (pf_ >= PF::GenericXeHPC);
 
     auto osys = xehpc ? 16 : 8;
     auto ksys = int(32 / types::data_type_size(a_type));
@@ -691,7 +690,7 @@ status_t gen_xe_systolic_kernel_desc_t::select_kernel(compute::gpu_arch_t arch,
     }
 
     // Find it in the catalog.
-    MatchParams match_params(hw_, true, is_integrated, problem_);
+    MatchParams match_params(hw_, pf_, true, is_integrated, problem_);
 
     // By default gemmstone assumes that the accumulation type must be at least
     // as wide as the output type. For oneDNN this restriction is not needed.
@@ -962,7 +961,7 @@ void gen_kernel_t::init_interface() {
     if (problem.boPtrDims >= 1 || problem.bScale2D())
         interface_.newArgument("offset_Bq", DataType::q);
 
-    if (desc()->hw_ >= HW::XeHPG) interface_.allowArgumentRearrangement(false);
+    if (desc()->pf_ >= ngen::PF::GenericXeHPG) interface_.allowArgumentRearrangement(false);
     interface_.externalName(kernel_name());
     interface_.setEfficient64Bit(desc_.efficient_64b_);
 }
@@ -981,11 +980,11 @@ dsl::kernel_t get_dsl_kernel(const GEMMProblem &problem,
     return make_kernel(gemm_desc);
 }
 
-std::string dump_kernel(ngen::HW hw, const gemmstone::GEMMProblem &problem,
+std::string dump_kernel(ngen::PF pf, const gemmstone::GEMMProblem &problem,
         const gemmstone::GEMMStrategy &strategy) {
     auto pstr = problem.toString();
     auto astr = problem.scalarsToString();
-    auto sstr = unparseStrategy(hw, problem, strategy);
+    auto sstr = unparseStrategy(pf, problem, strategy);
     if (!astr.empty()) astr += ' ';
     return pstr + ' ' + std::to_string(strategy.unroll[LoopM]) + ' '
             + std::to_string(strategy.unroll[LoopN]) + ' ' + astr + sstr;
@@ -1021,15 +1020,13 @@ status_t gen_kernel_t::get_kernel(
             REG_XEHPC_ISA(ARCH_DISPATCH(XeHPC))
             REG_XE2_ISA(ARCH_DISPATCH(Xe2))
             REG_XE3_ISA(ARCH_DISPATCH(Xe3))
-            REG_XE3P_ISA(ARCH_DISPATCH(XE3P_35_10))
-            REG_XE3P_ISA(ARCH_DISPATCH(XE3P_35_11))
-            REG_XE3P_ISA(ARCH_DISPATCH(XE3P_UNKNOWN))
+            REG_XE3P_ISA(ARCH_DISPATCH(Xe3P))
             default: assert(!"Unsupported architecture"); break;
         }
     } catch (const ngen::out_of_registers_exception &err) {
         // OOR is not an unrecoverable error, so let's not scare the user
         VDEBUGINFO(1, primitive, gpu, "%s,%s,%s", "jit::gemm", err.what(),
-                dump_kernel(desc()->hw_, desc()->problem_, desc()->strategy_)
+                dump_kernel(desc()->pf_, desc()->problem_, desc()->strategy_)
                         .c_str());
     } catch (const std::runtime_error &err) {
         VERROR(primitive, gpu, "%s,%s", "jit::gemm", err.what());
@@ -1048,7 +1045,7 @@ void gen_kernel_t::maybe_print_verbose() {
                 desc()->entry().str().c_str());
 
     verbose_printf("info,gpu,gemm,kernel:%s\n",
-            dump_kernel(desc()->hw_, desc()->problem_, desc()->strategy_)
+            dump_kernel(desc()->pf_, desc()->problem_, desc()->strategy_)
                     .c_str());
 }
 

@@ -25,6 +25,7 @@ hw_t::hw_t(const ngen::Product &product, int eu_count, int max_wg_size,
         size_t l3_cache_size, attr_t attr)
     : product_(product)
     , hw_(ngen::getCore(product.family))
+    , pf_(product.family)
     , eu_count_(eu_count)
     , max_wg_size_(max_wg_size)
     , l3_cache_size_(l3_cache_size)
@@ -36,7 +37,7 @@ ngen::Product hw_t::product() const {
     return product;
 }
 
-ngen::ProductFamily hw_t::family() const {
+ngen::PF hw_t::family() const {
     return product().family;
 }
 
@@ -63,9 +64,7 @@ int hw_t::eus_per_core() const {
         case ngen::HW::XeHPC:
         case ngen::HW::Xe2:
         case ngen::HW::Xe3:
-        case ngen::HW::XE3P_35_10:
-        case ngen::HW::XE3P_35_11:
-        case ngen::HW::XE3P_UNKNOWN: return 8;
+        case ngen::HW::Xe3P: return 8;
         default: gpu_error_not_expected(); return 8;
     }
 }
@@ -78,9 +77,7 @@ int hw_t::threads_per_eu(int regs) const {
         case ngen::HW::XeHPC:
         case ngen::HW::Xe2:
         case ngen::HW::Xe3:
-        case ngen::HW::XE3P_35_10:
-        case ngen::HW::XE3P_35_11:
-        case ngen::HW::XE3P_UNKNOWN: return is_large_grf ? 4 : 8;
+        case ngen::HW::Xe3P: return is_large_grf ? 4 : 8;
         default: gpu_error_not_expected(); return 8;
     }
 }
@@ -93,9 +90,7 @@ int hw_t::cache_line_size() const {
         case ngen::HW::XeHPC:
         case ngen::HW::Xe2:
         case ngen::HW::Xe3:
-        case ngen::HW::XE3P_35_10:
-        case ngen::HW::XE3P_35_11:
-        case ngen::HW::XE3P_UNKNOWN: return 64;
+        case ngen::HW::Xe3P: return 64;
         default: gpu_error_not_expected();
     }
     return 0;

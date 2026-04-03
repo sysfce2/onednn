@@ -166,9 +166,8 @@ status_t grouped_micro_gemm_t::pd_t::init_microkernels(impl::engine_t *engine) {
             // Example: 16 16 aT32 aM32 aB wg 2x4 sys
             printf("GRPGEMM_USTRATEGY: %s\n", newStrat.c_str());
             auto product = ngen::npack::decodeHWIPVersion(hw_info.gmdid);
-            auto hw = getCore(product.family);
             auto stepping = hw_info.gmdid & 0xFF;
-            strat = GEMMStrategy(hw, stepping);
+            strat = GEMMStrategy(product.family, stepping);
             std::stringstream ss(newStrat);
             ss >> strat.unroll[0];
             ss >> strat.unroll[1];
@@ -178,8 +177,8 @@ status_t grouped_micro_gemm_t::pd_t::init_microkernels(impl::engine_t *engine) {
             Scalar alpha(a), beta(b);
             std::string strategyString;
             std::getline(ss >> std::ws, strategyString);
-            parseStrategy(strategyString.c_str(), hw, problem, strat);
-            adjustStrategy(hw, problem, strat);
+            parseStrategy(strategyString.c_str(), product.family, problem, strat);
+            adjustStrategy(product.family, problem, strat);
         }
         strategyGRFs_ = strat.GRFs;
     };

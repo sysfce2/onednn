@@ -48,7 +48,7 @@ public:
     SubregisterPair &operator=(ngen::Subregister reg) { regs[0] = regs[1] = reg; negative = false; return *this; }
 
     ngen::Subregister getReg(int idx) const;
-    ngen::Subregister getRegAvoiding(ngen::HW hw, const ngen::RegData &rd) const;
+    ngen::Subregister getRegAvoiding(ngen::PF pf, const ngen::RegData &rd) const;
 
     bool isValid()      const { return regs[0].isValid() && regs[1].isValid(); }
     bool isInvalid()    const { return !isValid(); }
@@ -176,7 +176,7 @@ struct CommonState {
         bool use = false;
     } invertSub;
 
-    CommonState(ngen::HW hw) : ra(hw), raVFlag(hw), tokenAllocator(hw) {}
+    CommonState(ngen::PF pf) : ra(pf), raVFlag(ngen::getCore(pf)), tokenAllocator(ngen::getCore(pf)) {}
 
     VirtualFlag allocVFlag(ngen::HW hw, int n = 1);
     void wipeActiveVFlags();
@@ -438,7 +438,7 @@ struct GEMMState : public CommonState {
         ngen::InstructionModifier depAddr[4];
     } sysgemm;
 
-    GEMMState(ngen::HW hw, const GEMMStrategy &strategy) : CommonState(hw),
+    GEMMState(ngen::PF pf, const GEMMStrategy &strategy) : CommonState(pf),
                                                            ldaIncrements(strategy.A),        ldbIncrements(strategy.B),
                                                            ldaoIncrements(strategy.AO),      ldboIncrements(strategy.BO),
                                                            ldasIncrements(strategy.A_scale), ldbsIncrements(strategy.B_scale),

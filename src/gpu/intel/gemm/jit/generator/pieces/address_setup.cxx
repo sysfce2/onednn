@@ -91,18 +91,18 @@ void Generator<hw>::doneShift(const SubregisterPair &ptr, const SubregisterPair 
 // Bank conflict avoidance helpers.
 inline namespace {
     template <typename T> struct ACHelper {
-        static T avoidConflict(HW hw, const T &x, const RegData &other) { return x; }
+        static T avoidConflict(PF pf, const T &x, const RegData &other) { return x; }
     };
     template <> struct ACHelper<SubregisterPair> {
-        static Subregister avoidConflict(HW hw, const SubregisterPair &x, const RegData &other) {
-            return x.getRegAvoiding(hw, other);
+        static Subregister avoidConflict(PF pf, const SubregisterPair &x, const RegData &other) {
+            return x.getRegAvoiding(pf, other);
         }
     };
 }
 template <typename T>
-decltype(ACHelper<T>::avoidConflict(HW::Unknown, std::declval<T>(), RegData()))
-avoidConflict(HW hw, const T &x, const RegData &other) {
-    return ACHelper<T>::avoidConflict(hw, x, other);
+decltype(ACHelper<T>::avoidConflict(PF::Unknown, std::declval<T>(), RegData()))
+avoidConflict(PF pf, const T &x, const RegData &other) {
+    return ACHelper<T>::avoidConflict(pf, x, other);
 }
 
 // Address setup utility routines.
@@ -229,7 +229,7 @@ void Generator<hw>::setupAddr(Type T, const GRFRange &addr, const BO &ptr, const
                         eadd(simd2, addr[2].uq(), addr[udStride].ud(0)(udStride), ptrShifted, strategy, state);
                     eadd(simd1, addr[0].uq(), addr[0].ud(0)(udStride), ptrShifted, strategy, state);
                 } else if (ptrShifted != 0) {
-                    if (consecutive > 1 || tblock > 1 || hw >= HW::XE3P_35_10)
+                    if (consecutive > 1 || tblock > 1 || hw >= HW::Xe3P)
                     {
                         mulConstant<uint32_t>(simdSize, addr, iv, stride);
                         add<uint32_t>(simdSize, addr, addr, ptrShifted);
@@ -655,10 +655,11 @@ void Generator<hw>::incAddrShifted(const GRFRange &addrDst, const GRFRange &addr
 
     if (blockDst.addrShift != blockSrc.addrShift)
         stub();
-
-    auto cinc  = avoidConflict(hw, inc, addrSrc[0]);
-    auto cincR = avoidConflict(hw, incR, addrSrc[0]);
-    auto cincC = avoidConflict(hw, incC, addrSrc[0]);
+    
+    auto pf = getProductFamily();
+    auto cinc  = avoidConflict(pf, inc, addrSrc[0]);
+    auto cincR = avoidConflict(pf, incR, addrSrc[0]);
+    auto cincC = avoidConflict(pf, incC, addrSrc[0]);
 
     switch (blockSrc.effectiveAccessType(atype, astrategy)) {
         case AccessType::PseudoBlock:
@@ -673,7 +674,7 @@ void Generator<hw>::incAddrShifted(const GRFRange &addrDst, const GRFRange &addr
             if (astrategy.base.getModel() == ModelA64) {
                 auto simd = 2 * elementsPerGRF(hw, Type::u64);
                 for (int ar = 0; naddrDst > 0; ar += 2, naddrDst -= simd)
-                    eadd<uint64_t>(std::min(naddrDst, simd), addrDst[ar], addrSrc[ar], avoidConflict(hw, inc, addrSrc[ar]), strategy, state);
+                    eadd<uint64_t>(std::min(naddrDst, simd), addrDst[ar], addrSrc[ar], avoidConflict(pf, inc, addrSrc[ar]), strategy, state);
             } else
                 add<uint32_t>(naddrDst, addrDst[0], addrSrc[0], cinc);
             break;

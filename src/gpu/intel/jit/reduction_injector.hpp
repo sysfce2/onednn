@@ -53,6 +53,7 @@ struct reduction_injector_f32_t {
     }
 
     ngen::HW hw() const { return h.getHardware(); }
+    ngen::PF pf() const { return h.getProductFamily(); }
     // src_ptr: GRF whose 1st qword subregister holds the first address to be loaded from
     // acc: Potentially uninitialized GRFRange to store values in
     // stride: Number of elements to increment the pointer by between iterations

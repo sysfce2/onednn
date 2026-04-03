@@ -46,7 +46,7 @@ void Generator<hw>::gemmAlphaScale(GEMMProblem &problem, const GEMMStrategy &str
         map(hw, Tacc.real(), state.C_regs[0], state.C_regs[0], strategy,
             [&](int esize, GRF acc, GRF _) {
                 alpha.fixed() ? mul(esize, acc, acc, cast(Tacc.real(), alpha))
-                              : mul(esize, acc, acc, valphar.getRegAvoiding(hw, acc));
+                              : mul(esize, acc, acc, valphar.getRegAvoiding(getProductFamily(), acc));
             }
         );
     }
@@ -79,7 +79,7 @@ void Generator<hw>::gemmBetaScale(const GEMMProblem &problem, const GEMMStrategy
     if (beta != 1) {
         map(hw, Ts.real(), state.C_regs[0], state.C_regs[0], strategy, [&](int esize, GRF acc, GRF _) {
             beta.fixed() ? mul(esize, acc, acc, cast(Ts.real(), beta))
-                         : mul(esize, acc, acc, vbetar.getRegAvoiding(hw, acc));
+                         : mul(esize, acc, acc, vbetar.getRegAvoiding(getProductFamily(), acc));
         });
 
         if (problem.sumA || problem.sumB) {
@@ -91,7 +91,7 @@ void Generator<hw>::gemmBetaScale(const GEMMProblem &problem, const GEMMStrategy
 
             map(hw, Tc.real(), Xs_usedRegs, Xs_usedRegs, strategy, [&](int esize, GRF acc, GRF _) {
                 beta.fixed() ? mul(esize, acc, acc, cast(Tc.real(), beta))
-                             : mul(esize, acc, acc, vbetar.getRegAvoiding(hw, acc));
+                             : mul(esize, acc, acc, vbetar.getRegAvoiding(getProductFamily(), acc));
             });
         }
     }
@@ -160,7 +160,7 @@ void Generator<hw>::gemmScalarBinaryOpC(BinaryOp op, Type Tco, const Subregister
 
     if (Tco != Tacc) {
         offsetTc = state.ra.alloc_sub(Tacc.ngen());
-        CopyPlan plan(hw, strategy.systolicAvailable);
+        CopyPlan plan(getProductFamily(), strategy.systolicAvailable);
         plan.append(Opcode::mov, 1, offsetTc, scalar);
         copyExecute(std::move(plan), state);
     }

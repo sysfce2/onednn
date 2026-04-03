@@ -119,13 +119,13 @@ dsl::hw_t get_hardware(cl_device_id device, cl_context context) {
     if (err) return {};
     ngen::HW hw = ngen::getCore(product.family);
 
-    if (hw >= ngen::HW::XeHPC) attr |= dsl::hw::attr_t::large_grf;
+    if (product.family >= ngen::PF::GenericXeHPC) attr |= dsl::hw::attr_t::large_grf;
 
     if (attrs_cl & CL_DEVICE_FEATURE_FLAG_DPAS_INTEL)
         attr |= dsl::hw::attr_t::systolic;
     if (attrs_cl & CL_DEVICE_GLOBAL_FP_ATOMIC_LOAD_STORE_EXT
-            && product.family != ngen::ProductFamily::ARL
-            && product.family != ngen::ProductFamily::MTL)
+            && product.family != ngen::PF::ARL
+            && product.family != ngen::PF::MTL)
         attr |= dsl::hw::attr_t::atomic_fp64;
     if (ngen::OpenCLCodeGenerator<ngen::HW::Unknown>::detectEfficient64Bit(
                 context, device, hw))

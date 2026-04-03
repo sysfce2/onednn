@@ -38,7 +38,7 @@ using std::vector;
 template <HW hw>
 void Generator<hw>::gemm(GEMMProblem problem, GEMMStrategy strategy, const InterfaceHandler &interface_)
 {
-    GEMMState state(hw, strategy);
+    GEMMState state(getProductFamily(), strategy);
     interface = interface_;
     gemm(problem, strategy, state);
 }
@@ -56,7 +56,7 @@ void Generator<hw>::gemm(GEMMProblem &problem, GEMMStrategy &strategy, GEMMState
     setDefaultAutoSWSB();
 
     // Set up.
-    problem.autoTypeConversions(hw, strategy.systolic);
+    problem.autoTypeConversions(getProductFamily(), strategy.systolic);
     gemmInitState(problem, strategy, state);
 
     // Transfer surface indices to strategy AddressBases.
@@ -848,7 +848,7 @@ void Generator<hw>::gemmSubkernel(GEMMProblem &problem, GEMMStrategy &strategy, 
         if (!gemmMEdge(problem, modStrategy, state)) {
             modStrategy.checkAdd32 = false;                     // Don't optimize additions on this (slow) path to reduce code size.
             status << "Reducing register usage" << status_stream::endl;
-            success = success && modStrategy.minimize(hw, problem);
+            success = success && modStrategy.minimize(getProductFamily(), problem);
 
             gemmCalcIncrements(problem, modStrategy, state);    // Recalculate ld increments as they may have changed.
 

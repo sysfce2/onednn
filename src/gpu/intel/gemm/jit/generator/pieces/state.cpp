@@ -30,9 +30,9 @@ Subregister SubregisterPair::getReg(int idx) const
     return r;
 }
 
-Subregister SubregisterPair::getRegAvoiding(HW hw, const RegData &rd) const
+Subregister SubregisterPair::getRegAvoiding(PF pf, const RegData &rd) const
 {
-    if (Bundle::same_bank(hw, rd, regs[0]))
+    if (Bundle::same_bank(pf, rd, regs[0]))
         return getReg(1);
     else
         return getReg(0);

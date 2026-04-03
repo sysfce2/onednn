@@ -81,8 +81,7 @@ public:
         requireSIMD((GRF::bytes(hw) == 64) ? 16 : 8);
         requireLocalID(3); // r1-r3
         requireLocalSize(); // r7.0-2:ud
-        if (utils::one_of(hw, ngen::HW::XE3P_35_10, ngen::HW::XE3P_35_11,
-                    ngen::HW::XE3P_UNKNOWN))
+        if (hw == ngen::HW::Xe3P)
             setEfficient64Bit(engine->device_info()->is_efficient_64bit());
         finalizeInterface();
 
@@ -207,16 +206,10 @@ public:
                             engine, skip_check);
                     break;
                 case compute::gpu_arch_t::xe3p_35_10:
-                    kernel = binary_format_kernel_t<
-                            HW::XE3P_35_10>::make_kernel(engine, skip_check);
-                    break;
                 case compute::gpu_arch_t::xe3p_35_11:
-                    kernel = binary_format_kernel_t<
-                            HW::XE3P_35_11>::make_kernel(engine, skip_check);
-                    break;
                 case compute::gpu_arch_t::xe3p_35_unknown:
                     kernel = binary_format_kernel_t<
-                            HW::XE3P_UNKNOWN>::make_kernel(engine, skip_check);
+                            HW::Xe3P>::make_kernel(engine, skip_check);
                     break;
 
                 case compute::gpu_arch_t::unknown:

@@ -108,6 +108,7 @@ public:
     }
 
     ngen::HW hw() const { return host_->getHardware(); }
+    constexpr ngen::PF pf() const { return host_->getProductFamily(); }
 
     void _visit(const alloc_t &obj) override {
         ngen_register_scope_t scope(host_->ra());
@@ -427,7 +428,7 @@ private:
             const ngen::RegData &_src0, const ngen::RegData &_src1,
             const ngen::RegData &_src2, bool is_dpas = false) {
         int esize = mod.getExecSize();
-        int hw_simd = (hw() >= ngen::HW::XeHPC ? 16 : 8);
+        int hw_simd = (pf() >= ngen::PF::GenericXeHPC ? 16 : 8);
         auto shift = [this](const ngen::RegData &rd, int exec_off) {
             if (exec_off == 0 || rd.isNull()) return rd;
             int type_size = ngen::getBytes(rd.getType());
@@ -447,15 +448,15 @@ private:
             auto src0 = shift(_src0, i);
             auto src1 = shift(_src1, i);
             auto src2 = shift(_src2, i);
-            bool same_bank01 = ngen::Bundle::same_bank(hw(), src0, src1);
-            bool same_bank02 = ngen::Bundle::same_bank(hw(), src0, src2);
+            bool same_bank01 = ngen::Bundle::same_bank(pf(), src0, src1);
+            bool same_bank02 = ngen::Bundle::same_bank(pf(), src0, src2);
             if (is_dpas) {
                 if (same_bank02) bank_conflicts_++;
             } else {
                 if (same_bank01 && same_bank02) bank_conflicts_++;
-                if (ngen::Bundle::conflicts(hw(), src0, src1)
-                        || ngen::Bundle::conflicts(hw(), src0, src2)
-                        || ngen::Bundle::conflicts(hw(), src1, src2)) {
+                if (ngen::Bundle::conflicts(pf(), src0, src1)
+                        || ngen::Bundle::conflicts(pf(), src0, src2)
+                        || ngen::Bundle::conflicts(pf(), src1, src2)) {
                     bundle_conflicts_++;
                 }
             }
@@ -779,8 +780,10 @@ private:
                 mod |= flag;
             }
         }
-        if ((hw() <= ngen::HW::XeLP && send_func.is_atomic())
-                || (hw() == ngen::HW::XeHPG && send_func.is_atomic()
+        if ((pf() <= ngen::PF::GenericXeLP && send_func.is_atomic())
+                || (pf() >= ngen::PF::GenericXeHPG
+                        && pf() < ngen::PF::GenericXeHPC
+                        && send_func.is_atomic()
                         && send_func.type.is_qword()
                         && !(host_->hw_info().has_fp64_atomic_support()))) {
             send_atomic_add_emu(
@@ -823,11 +826,11 @@ private:
     std::vector<int> last_used_header_regs_;
 };
 
-bool is_src1_ok(ngen::HW hw, const ngen_operand_t &dst,
+bool is_src1_ok(ngen::PF pf, const ngen_operand_t &dst,
         const ngen_operand_t &src0, const ngen_operand_t &src1) {
-    if (one_of(hw,
-                {ngen::HW::XE3P_35_10, ngen::HW::XE3P_35_11,
-                        ngen::HW::XE3P_UNKNOWN})) {
+    if (one_of(pf,
+                {ngen::PF::XE3P_35_10, ngen::PF::XE3P_35_11,
+                        ngen::PF::XE3P_UNKNOWN})) {
         if (!src1.is_reg_data()) return true;
         auto src1_rd = src1.reg_data();
         if (src1_rd.isScalar()) return true;
@@ -846,6 +849,7 @@ public:
         : host_(host), expr_binding_(host->expr_binding()), scope_(scope) {}
 
     constexpr ngen::HW hw() const { return host_->getHardware(); }
+    constexpr ngen::PF pf() const { return host_->getProductFamily(); }
 
     bool is_int_up_convert(const expr_t &e, type_t &type) const {
         auto it = int_up_converts_.find(e);
@@ -871,7 +875,7 @@ public:
                             bind.reg_data(), 0);
                 } else {
                     const auto grf_size = ngen::GRF::bytes(hw());
-                    if (hw() >= ngen::HW::XE3P_35_10
+                    if (pf() >= ngen::PF::GenericXe3P
                             && bind.is_reg_buf_data()) {
                         auto mod = dst_operand.mod();
                         auto dst = dst_operand.reg_data();
@@ -1612,9 +1616,7 @@ private:
         auto t = tmp.format(0, obj.elems(), 1, w_type);
         reg_buf_data_t t_strided;
         bool align_with_dst = false;
-        if (one_of(hw(),
-                    {ngen::HW::XE3P_35_10, ngen::HW::XE3P_35_11,
-                            ngen::HW::XE3P_UNKNOWN}))
+        if (pf() >= ngen::PF::GenericXe3P)
             align_with_dst = true;
         if (align_with_dst) {
             int w_stride = dst_stride * (ngen::getBytes(dst.type()) / w_size);
@@ -1714,9 +1716,7 @@ ngen::NEOInterfaceHandler generate_ngen_interface(
     if (setup_flags.has_dpas || options.require_dpas()) interface.requireDPAS();
     if (setup_flags.has_send_atomics) interface.requireGlobalAtomics();
 
-    if (one_of(options.hw(),
-                {ngen::HW::XE3P_35_10, ngen::HW::XE3P_35_11,
-                        ngen::HW::XE3P_UNKNOWN})
+    if (options.hw().family() >= ngen::PF::GenericXe3P
             && !options.hw().efficient_64_bit())
         interface.setEfficient64Bit(false);
 
@@ -1795,9 +1795,7 @@ ngen::NEOInterfaceHandler generate_ngen_interface(
         GEMMSTONE_XEHPC_ISA(GPU_HW_CASE_(XeHPC)); \
         GEMMSTONE_XE2_ISA(GPU_HW_CASE_(Xe2)); \
         GEMMSTONE_XE3_ISA(GPU_HW_CASE_(Xe3)); \
-        GEMMSTONE_XE3P_ISA(GPU_HW_CASE_(XE3P_35_10)); \
-        GEMMSTONE_XE3P_ISA(GPU_HW_CASE_(XE3P_35_11)); \
-        GEMMSTONE_XE3P_ISA(GPU_HW_CASE_(XE3P_UNKNOWN)); \
+        GEMMSTONE_XE3P_ISA(GPU_HW_CASE_(Xe3P)); \
         default: dsl_assert(false) << "Unexpected GPU architecture"; \
     }
 
@@ -1871,18 +1869,9 @@ GEMMSTONE_XE3_ISA(
                 const stmt_t &body, sycl_gen_t<ngen::HW::Xe3> &host,
                 const walk_order_t *kernel_grid_walk_order));
 GEMMSTONE_XE3P_ISA(
-        template void ir::convert_ir_to_ngen<sycl_gen_t<ngen::HW::XE3P_35_10>>(
-                const stmt_t &body, sycl_gen_t<ngen::HW::XE3P_35_10> &host,
+        template void ir::convert_ir_to_ngen<sycl_gen_t<ngen::HW::Xe3P>>(
+                const stmt_t &body, sycl_gen_t<ngen::HW::Xe3P> &host,
                 const walk_order_t *kernel_grid_walk_order));
-GEMMSTONE_XE3P_ISA(
-        template void ir::convert_ir_to_ngen<sycl_gen_t<ngen::HW::XE3P_35_11>>(
-                const stmt_t &body, sycl_gen_t<ngen::HW::XE3P_35_11> &host,
-                const walk_order_t *kernel_grid_walk_order));
-GEMMSTONE_XE3P_ISA(template void
-                ir::convert_ir_to_ngen<sycl_gen_t<ngen::HW::XE3P_UNKNOWN>>(
-                        const stmt_t &body,
-                        sycl_gen_t<ngen::HW::XE3P_UNKNOWN> &host,
-                        const walk_order_t *kernel_grid_walk_order));
 
 ::sycl::kernel make_kernel(
         const kernel_t &ir_kernel, ::sycl::context ctx, ::sycl::device dev) {
@@ -1935,16 +1924,8 @@ GEMMSTONE_XE3_ISA(
                 const stmt_t &body, ocl_gen_t<ngen::HW::Xe3> &host,
                 const walk_order_t *kernel_grid_walk_order));
 GEMMSTONE_XE3P_ISA(
-        template void ir::convert_ir_to_ngen<ocl_gen_t<ngen::HW::XE3P_35_10>>(
-                const stmt_t &body, ocl_gen_t<ngen::HW::XE3P_35_10> &host,
-                const walk_order_t *kernel_grid_walk_order));
-GEMMSTONE_XE3P_ISA(
-        template void ir::convert_ir_to_ngen<ocl_gen_t<ngen::HW::XE3P_35_11>>(
-                const stmt_t &body, ocl_gen_t<ngen::HW::XE3P_35_11> &host,
-                const walk_order_t *kernel_grid_walk_order));
-GEMMSTONE_XE3P_ISA(
-        template void ir::convert_ir_to_ngen<ocl_gen_t<ngen::HW::XE3P_UNKNOWN>>(
-                const stmt_t &body, ocl_gen_t<ngen::HW::XE3P_UNKNOWN> &host,
+        template void ir::convert_ir_to_ngen<ocl_gen_t<ngen::HW::Xe3P>>(
+                const stmt_t &body, ocl_gen_t<ngen::HW::Xe3P> &host,
                 const walk_order_t *kernel_grid_walk_order));
 
 cl_kernel make_kernel(

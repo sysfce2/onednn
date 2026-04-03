@@ -1102,6 +1102,7 @@ static inline bool needsKLoopReset(const GEMMProblem &problem)
 template <HW hw>
 bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &strategy, GEMMState &state)
 {
+    auto pf = getProductFamily();
     auto &Ta = problem.Ta, &Tb = problem.Tb, Tc = problem.Tc, Tc_compute = problem.Tc_compute();
     auto Ta_ext = problem.Ta_ext, Tb_ext = problem.Tb_ext, Tc_ext = problem.Tc_ext;
     auto Tao = problem.Tao, Tbo = problem.Tbo;
@@ -1219,9 +1220,9 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
     if (strategy.slmBuffers > 0) {
         int A_slmCP, B_slmCP;
         int A_tileR, A_tileC, B_tileR, B_tileC;
-        std::tie(A_slmCP, B_slmCP) = targetSLMCrosspack(hw, problem, strategy);
-        std::tie(A_tileR, A_tileC, B_tileR, B_tileC) = targetKernelTiling(hw, problem, strategy);
-        auto opCount = outerProductCount(hw, problem, strategy);
+        std::tie(A_slmCP, B_slmCP) = targetSLMCrosspack(pf, problem, strategy);
+        std::tie(A_tileR, A_tileC, B_tileR, B_tileC) = targetKernelTiling(pf, problem, strategy);
+        auto opCount = outerProductCount(pf, problem, strategy);
 
         if (slmA) {
             coopSplit(true, state.ma_slm, state.ka_slm, unrollM, unrollKSLM, strategy.wgTile(LoopM), state.effCoopA, problem.A, strategy);
@@ -1620,8 +1621,8 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
 
     // Prepare to repack A/B if needed.
     int crosspackA, crosspackB, tileM_A, tileK_A, tileK_B, tileN_B;
-    std::tie(crosspackA, crosspackB) = targetKernelCrosspack(hw, problem, strategy);
-    std::tie(tileM_A, tileK_A, tileK_B, tileN_B) = targetKernelTiling(hw, problem, strategy);
+    std::tie(crosspackA, crosspackB) = targetKernelCrosspack(pf, problem, strategy);
+    std::tie(tileM_A, tileK_A, tileK_B, tileN_B) = targetKernelTiling(pf, problem, strategy);
 
     state.repackA |= (crosspackA && !state.A_layout.hasFullCrosspack(crosspackA));
     state.repackB |= (crosspackB && !state.B_layout.hasFullCrosspack(crosspackB));
@@ -1635,7 +1636,7 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
     state.repackA |= problem.earlyDequantizeA() && !slmA;
     state.repackB |= problem.earlyDequantizeB() && !slmB;
 
-    bool is_xe3p = one_of(hw, {ngen::HW::XE3P_35_10, ngen::HW::XE3P_35_11, ngen::HW::XE3P_UNKNOWN});
+    bool is_xe3p = one_of(pf, {ngen::PF::XE3P_35_10, ngen::PF::XE3P_35_11, ngen::PF::XE3P_UNKNOWN});
     state.upConvertATo8Bit =  is_xe3p && Ta.bits() == 4 && Tb.bits() == 8 && strategy.systolic;
     state.upConvertBTo8Bit =  is_xe3p && Tb.bits() == 4 && Ta.bits() == 8 && strategy.systolic;
 
@@ -1657,7 +1658,7 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
         int repackN = state.ka_repack;
         if (problem.aqGroupK % state.ka_repack != 0 && state.ka_repack % problem.aqGroupK != 0){
                 state.ka_repack = gcd(problem.aqGroupK, state.ka_repack);
-                repackN = std::max(state.ka_repack, outerProductCount(hw, problem, strategy));
+                repackN = std::max(state.ka_repack, outerProductCount(pf, problem, strategy));
         }
 	    auto Ta_repack = Ta;
 	    if (state.upConvertATo8Bit)
@@ -1672,7 +1673,7 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
 	    state.Br_layout = RegisterLayout(hw, Tb_repack, strategy.kb_load, unrollN, state.B_layout.colMajor(), state.upConvertBTo8Bit ? crosspackB/2 : crosspackB, tileK_B, tileN_B, true, splitB);
     }
     // Prepare to repack C if needed, and choose repack tile size.
-    if (Tc != Tc_compute || problem.forceLateQuant(hw, minOuterProductCount(hw, problem, strategy))) {
+    if (Tc != Tc_compute || problem.forceLateQuant(pf, minOuterProductCount(pf, problem, strategy))) {
         auto &period = state.cRepackPeriod;
         int panel = strategy.cRepackPanel;
         if (panel == 0)
@@ -1694,7 +1695,7 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
         } else {
             // Repack partial tiles, interleaved with computation.
             Cr_unrollX = panel;
-            period = outerProductCount(hw, problem, strategy);
+            period = outerProductCount(pf, problem, strategy);
         }
 
         if (strategy.kInterleave)
@@ -2557,6 +2558,7 @@ void Generator<hw>::gemmInitInterface(GEMMProblem &problem, GEMMStrategy &strate
     Subregister localSize[3];
     GRF localID[3];
     Subregister tgids[3] = {r0.ud(1), r0.ud(6), r0.ud(7)};   // X, Y, Z threadgroup IDs
+    auto pf = getProductFamily();
 
     initInterface(problem, strategy, state);
     if (strategy.systolic)
@@ -2567,7 +2569,7 @@ void Generator<hw>::gemmInitInterface(GEMMProblem &problem, GEMMStrategy &strate
         interface.requireBarrier();
 
     auto slmSize = gemmSLMSize(hw, problem, strategy);
-    auto slmPerK = gemmPerKSLMSize(hw, problem, strategy);
+    auto slmPerK = gemmPerKSLMSize(getProductFamily(), problem, strategy);
     if (slmSize > 0 || slmPerK > 0) {
         status << "SLM usage: " << slmSize / 1024. << 'k';
         if (slmPerK)
@@ -2578,7 +2580,7 @@ void Generator<hw>::gemmInitInterface(GEMMProblem &problem, GEMMStrategy &strate
         interface.requireBarrier();
     }
 
-    size_t slm = maxSLMPerWG(hw, strategy.GRFs);
+    size_t slm = maxSLMPerWG(pf, strategy.GRFs);
     if (slmSize > slm || slmPerK * strategy.wg[LoopK] > slm)
         stub("Strategy requests more SLM than available");
 
@@ -3185,7 +3187,7 @@ void Generator<hw>::gemmInitState(GEMMProblem &problem, GEMMStrategy &strategy, 
         state.tempCStrategy.padded = true;
     }
 
-    state.useBDPAS = problem.preferBDPAS(hw) && strategy.systolic;
+    state.useBDPAS = problem.preferBDPAS(getProductFamily()) && strategy.systolic;
 }
 
 GEMMSTONE_NAMESPACE_END

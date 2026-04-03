@@ -121,14 +121,15 @@ struct DependencyRegion {
     uint8_t checkWAW : 1;
     uint8_t rf : 2;
     HW hw;
+    PF pf;
     std::array<uint32_t, 32> masks;
 
-    DependencyRegion() : DependencyRegion(HW::Unknown) {}
-    explicit DependencyRegion(HW hw_) : base(0), size(0), unspecified{true}, checkWAW{false}, rf{RegFileGRF}, hw{hw_} {
+    DependencyRegion() : DependencyRegion(PF::Unknown) {}
+    explicit DependencyRegion(PF pf_) : base(0), size(0), unspecified{true}, checkWAW{false}, rf{RegFileGRF}, hw{ngen::getCore(pf_)}, pf{pf_} {
         for (auto &m: masks) m = 0;
     }
-    inline DependencyRegion(HW hw, RegisterRange r);
-    inline DependencyRegion(HW hw, int esize, RegData rr);
+    inline DependencyRegion(PF pf, RegisterRange r);
+    inline DependencyRegion(PF pf, int esize, RegData rr);
 
     inline void intersect(const DependencyRegion &other);
     inline void subtract(const DependencyRegion &other);
@@ -141,7 +142,7 @@ struct DependencyRegion {
                 return false;
         return true;
     }
-    void clear()        { *this = DependencyRegion(hw); unspecified = false; checkWAW = false; rf = 0; }
+    void clear()        { *this = DependencyRegion(pf); unspecified = false; checkWAW = false; rf = 0; }
 
     void duplicateLH() {
         for (int i = 0; i < size; i++)
@@ -387,7 +388,7 @@ inline GeneralizedPipe getPipe(HW hw, const Instruction &insn, bool checkOOO = t
     unsigned lmask = (hw >= HW::XeHPC) ? 0b1011 : 0b0011;
     if ((dt & lmask) == lmask)
         mask = PipeMaskL;
-    else if ((hw >= HW::XE3P_35_10) && (op == Opcode::mov_gen12 || op == Opcode::srnd) && (dt != insn.src0Typecode()))
+    else if ((hw >= HW::Xe3P) && (op == Opcode::mov_gen12 || op == Opcode::srnd) && (dt != insn.src0Typecode()))
         mask = PipeMaskI;
     else if (dt & 8)
         mask = PipeMaskF;
@@ -452,14 +453,15 @@ static inline DataType dtForPipe(Pipe p)
 /**********************/
 /* Dependency Regions */
 /**********************/
-DependencyRegion::DependencyRegion(HW hw_, RegisterRange r)
+DependencyRegion::DependencyRegion(PF pf_, RegisterRange r)
 {
 #ifdef NGEN_SAFE
     if (r.isInvalid() || (r.getLen() > int(masks.size())))
         throw invalid_region_exception();
 #endif
 
-    hw = hw_;
+    hw = ngen::getCore(pf_);
+    pf = pf_;
     unspecified = false;
     checkWAW = false;
     rf = RegFileGRF;
@@ -468,12 +470,14 @@ DependencyRegion::DependencyRegion(HW hw_, RegisterRange r)
     makeFullMasks();
 }
 
-DependencyRegion::DependencyRegion(HW hw_, int esize, RegData rr)
+DependencyRegion::DependencyRegion(PF pf_, int esize, RegData rr)
 {
-    const auto mbits = GRF::bytes(hw_);
-    const auto log2MBits = GRF::log2Bytes(hw_);
+    hw = ngen::getCore(pf_);
+    pf = pf_;
 
-    hw = hw_;
+    const auto mbits = GRF::bytes(hw);
+    const auto log2MBits = GRF::log2Bytes(hw);
+
     base = rr.getBase();
     unspecified = false;
     checkWAW = false;
@@ -492,7 +496,7 @@ DependencyRegion::DependencyRegion(HW hw_, int esize, RegData rr)
     };
 
     auto compress = [&](uint64_t m) -> uint32_t {
-        if (hw_ >= HW::XeHPC) {
+        if (hw >= HW::XeHPC) {
             // Regions tracked at word granularity. OR and pack adjacent bits.
             // If any sub-word writes, need to track WAW dependencies.
             if ((m ^ (m >> 1)) & 0x5555555555555555)
@@ -1271,9 +1275,9 @@ void DependencyTable<consumer>::dump() const
 /***********************/
 
 template <typename Program>
-inline bool hasAutoSWSB(HW hw, const Program &program)
+inline bool hasAutoSWSB(PF pf, const Program &program)
 {
-    if (hw < HW::Gen12LP)
+    if (pf < PF::XeLP)
         return false;
     for (uint32_t n = 0; n < program.size(); n++)
         if (program[n].autoSWSB())
@@ -1298,7 +1302,7 @@ inline Directive getDirective(const Instruction &insn)
 template <typename Instruction>
 inline bool canDefaultPipe(HW hw, const Instruction &insn)
 {
-    if (hw >= HW::XE3P_35_10 && insn.opcode() == Opcode::mov_gen12)
+    if (hw >= HW::Xe3P && insn.opcode() == Opcode::mov_gen12)
         return false;
     if (hw >= HW::XeHP && insn.opcode() == Opcode::mov_gen12 && (insn.dstTypecode() ^ insn.src0Typecode()) & 0x8)
         return false;
@@ -1318,10 +1322,11 @@ static inline bool isSync(Opcode op)
 
 // Get a list of basic blocks for this program.
 template <typename Program>
-inline BasicBlockList getBasicBlocks(HW hw, const Program &program)
+inline BasicBlockList getBasicBlocks(PF pf, const Program &program)
 {
     bool enablePVCWARWA = true;
     auto icount = int(program.size());
+    auto hw = getCore(pf);
 
     // Create map from BB head instructions to instruction #s.
     std::map<int, int> heads;
@@ -1386,7 +1391,7 @@ inline BasicBlockList getBasicBlocks(HW hw, const Program &program)
             bb.n64 += insn.is64();
             if (isDirective(insn.opcode()))
                 bb.directives++;
-            auto pipes = getPipeMask(hw, insn);
+            auto pipes = getPipeMask(getCore(pf), insn);
             for (int p = 0; p < NPipes; p++)
                 if (pipes & (1 << p)) bb.lengths[p]++;
         }
@@ -1417,7 +1422,7 @@ inline BasicBlockList getBasicBlocks(HW hw, const Program &program)
         bb.opRegions.resize(bb.iend - bb.istart);
         std::array<bool, 6> ignoreDeps = {false};
 
-        DependencyRegion subDstRegion(hw);
+        DependencyRegion subDstRegion(pf);
         subDstRegion.clear();
 
         for (uint32_t n = bb.istart; n < bb.iend; n++) {
@@ -1441,6 +1446,7 @@ inline BasicBlockList getBasicBlocks(HW hw, const Program &program)
                         break;
                     case Directive::wrdep:
                         regions[1].hw = hw;
+                        regions[1].pf = pf;
                         insn.getOperandRegion(regions[1], 0);
                         break;
                     case Directive::fencedep: break;
@@ -1453,6 +1459,7 @@ inline BasicBlockList getBasicBlocks(HW hw, const Program &program)
 
             for (int srcN = -1; srcN < 5; srcN++) {
                 regions[srcN + 1].hw = hw;
+                regions[srcN + 1].pf = pf;
                 if (ignoreDeps[srcN + 1] || !insn.getOperandRegion(regions[srcN + 1], srcN))
                     regions[srcN + 1].clear();
             }
@@ -1880,9 +1887,10 @@ PVCWARWA analyzePVCWARWA(HW hw, Program &program, BasicBlock &bb, int phase,
 //   Input: complete list of live dependencies.
 //   All unscoreboarded instructions are reanalyzed and scoreboarded now.
 template <typename Program>
-inline void analyze(HW hw, int tokens, Program &program, BasicBlock &bb, int phase, std::atomic<bool> *cancel)
+inline void analyze(PF pf, int tokens, Program &program, BasicBlock &bb, int phase, std::atomic<bool> *cancel)
 {
     if (cancel && *cancel) return;
+    auto hw = getCore(pf);
     const bool final = (phase == 2);
     const bool computeSWSB = (phase > 0);
     bool forceA1 = false;
@@ -1894,7 +1902,7 @@ inline void analyze(HW hw, int tokens, Program &program, BasicBlock &bb, int pha
     std::array<int32_t, NPipes> counters;
     std::vector<Producer> depList, depListIncoming, chainProducers, pvcWARWADeps;
     std::vector<std::pair<bool, const DependencyRegion*>> depOperands;
-    DependencyRegion cmodDepRegion(hw);
+    DependencyRegion cmodDepRegion(pf);
 
     auto allTokens = uint32_t((uint64_t(1) << tokens) - 1);
 
@@ -2672,16 +2680,17 @@ inline void adjustTargets(HW hw, Program &program, BasicBlockList &list)
 // Entrypoint for automatic software scoreboarding.
 // Returns the list of basic blocks, containing information on sync instructions to insert.
 template <typename Program>
-inline BasicBlockList autoSWSB(HW hw, int grfCount, Program &program, std::atomic<bool> *cancel)
+inline BasicBlockList autoSWSB(PF pf, int grfCount, Program &program, std::atomic<bool> *cancel)
 {
-    if (!hasAutoSWSB(hw, program)) {
+    if (!hasAutoSWSB(pf, program)) {
         return BasicBlockList();
     }
+    auto hw = getCore(pf);
 
     int tokens = tokenCount(hw, grfCount);
 
     // Find basic blocks.
-    BasicBlockList bbList = getBasicBlocks(hw, program);
+    BasicBlockList bbList = getBasicBlocks(pf, program);
 
 #ifdef NGEN_DEBUG
     std::cerr << "BASIC BLOCKS\n";
@@ -2705,7 +2714,7 @@ inline BasicBlockList autoSWSB(HW hw, int grfCount, Program &program, std::atomi
 
     // Analysis round 0: gather OOO instruction usage.
     for (auto &bb : bbList)
-        analyze(hw, tokens, program, bb, 0, cancel);
+        analyze(pf, tokens, program, bb, 0, cancel);
 
 #ifdef NGEN_DEBUG
     std::cerr << "ANALYZE PHASE 0\n";
@@ -2737,7 +2746,7 @@ inline BasicBlockList autoSWSB(HW hw, int grfCount, Program &program, std::atomi
 
     // Analysis round 1: assign SBIDs and perform intra-BB analysis.
     for (auto &bb : bbList) {
-        analyze(hw, tokens, program, bb, 1, cancel);
+        analyze(pf, tokens, program, bb, 1, cancel);
         bb.incoming.clear();
     }
 
@@ -2776,7 +2785,7 @@ inline BasicBlockList autoSWSB(HW hw, int grfCount, Program &program, std::atomi
 
     // Analysis round 2: final SWSB assignment.
     for (auto &bb : bbList)
-        analyze(hw, tokens, program, bb, 2, cancel);
+        analyze(pf, tokens, program, bb, 2, cancel);
 
 #ifdef NGEN_DEBUG
     std::cerr << "ANALYZE PHASE 2\n";

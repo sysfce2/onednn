@@ -140,7 +140,7 @@ void reduction_injector_f32_t<ngen_generator_t>::compute(
 
     int regs_per_inst = std::min(nregs, [this]() {
         int reg_size = ngen::GRF::bytes(hw());
-        compute::gpu_arch_t gpu_arch = convert_ngen_arch_to_dnnl(hw());
+        compute::gpu_arch_t gpu_arch = convert_ngen_arch_to_dnnl(pf());
         int max_exec_size = compute::device_info_t::max_exec_size(gpu_arch);
         return max_exec_size / reg_size;
     }());
@@ -277,11 +277,7 @@ REG_XEHPC_ISA(template struct reduction_injector_f32_t<code_gen<gpu_xe_hpc>>);
 REG_XE2_ISA(template struct reduction_injector_f32_t<code_gen<gpu_xe2>>);
 REG_XE3_ISA(template struct reduction_injector_f32_t<code_gen<gpu_xe3>>);
 REG_XE3P_ISA(
-        template struct reduction_injector_f32_t<code_gen<gpu_xe3p_35_10>>);
-REG_XE3P_ISA(
-        template struct reduction_injector_f32_t<code_gen<gpu_xe3p_35_11>>);
-REG_XE3P_ISA(template struct reduction_injector_f32_t<
-        code_gen<gpu_xe3p_35_unknown>>);
+        template struct reduction_injector_f32_t<code_gen<gpu_xe3p>>);
 
 #ifdef NGEN_ASM
 template struct reduction_injector_f32_t<ngen::AsmCodeGenerator>;

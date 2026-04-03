@@ -29,6 +29,7 @@ namespace ngen {
 enum class Core;
 using HW = Core;
 enum class ProductFamily : int;
+using PF = ProductFamily;
 struct Product;
 } // namespace ngen
 // NOLINTEND(readability-identifier-naming)
@@ -78,10 +79,11 @@ public:
             size_t l3_cache_size, attr_t attr);
 
     ngen::Product product() const;
-    ngen::ProductFamily family() const;
+    ngen::PF family() const;
     int stepping() const;
     ngen::HW ngen_hw() const { return hw_; }
     operator ngen::HW() const { return hw_; }
+    operator ngen::PF() const { return pf_; }
 
     bool has_fp64_atomic_support() const {
         return any(attr_ & attr_t::atomic_fp64);
@@ -104,12 +106,12 @@ public:
 
     std::string str() const;
 
-    bool operator<(ngen::HW rhs) const { return hw_ < rhs; }
-    bool operator>(ngen::HW rhs) const { return hw_ > rhs; }
-    bool operator<=(ngen::HW rhs) const { return hw_ <= rhs; }
-    bool operator>=(ngen::HW rhs) const { return hw_ >= rhs; }
-    bool operator==(ngen::HW rhs) const { return hw_ == rhs; }
-    bool operator!=(ngen::HW rhs) const { return hw_ != rhs; }
+    bool operator<(ngen::PF rhs) const { return pf_ < rhs; }
+    bool operator>(ngen::PF rhs) const { return pf_ > rhs; }
+    bool operator<=(ngen::PF rhs) const { return pf_ <= rhs; }
+    bool operator>=(ngen::PF rhs) const { return pf_ >= rhs; }
+    bool operator==(ngen::PF rhs) const { return pf_ == rhs; }
+    bool operator!=(ngen::PF rhs) const { return pf_ != rhs; }
 #if __cplusplus >= 202002L
     bool operator==(const hw_t &other) const = default;
 #endif
@@ -135,6 +137,7 @@ private:
     }
 
     ngen::HW hw_ = {};
+    ngen::PF pf_ = {};
     int eu_count_ = 0;
     size_t max_wg_size_ = 0;
     size_t l3_cache_size_ = 0;

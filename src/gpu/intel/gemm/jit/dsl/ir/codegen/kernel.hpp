@@ -147,7 +147,7 @@ public:
         : BaseGeneratorT(options.hw().product(), debug_config)
         , kernel_iface_(kernel_iface)
         , options_(options)
-        , ra_(getHardware())
+        , ra_(getProductFamily())
         , expr_binding_(getHardware())
         , emu_strategy_(getHardware(), options_.hw().stepping()) {
         ra_.setRegisterCount(options_.regs());
@@ -227,7 +227,7 @@ public:
         // disables the use of r0 to avoid the issue.
         ngen::GRF r0_info = BaseGeneratorT::r0;
         if (one_of(getProductFamily(),
-                    {ngen::ProductFamily::MTL, ngen::ProductFamily::ARL})) {
+                    {ngen::PF::MTL, ngen::PF::ARL})) {
             r0_info = ra_.alloc();
             int grf_size = ngen::GRF::bytes(getHardware());
             ra_.claim(r0_info);
@@ -291,7 +291,7 @@ public:
                                const ngen::Subregister &src1, uint32_t src2) {
             bool is_src2_16_bit
                     = (src2 <= std::numeric_limits<uint16_t>::max());
-            if (getHardware() >= ngen::HW::XeLP && is_src2_16_bit && false) {
+            if (getProductFamily() >= ngen::PF::XeLP && is_src2_16_bit && false) {
                 mad(1, dst, src0, src1, src2);
             } else {
                 auto tmp = ra_.alloc_sub<uint64_t>();
@@ -514,7 +514,7 @@ public:
         ngen_register_scope_t scope(ra_);
         align_src_dst_offset(this, scope, mod, dst, src0);
         align_src_dst_offset(this, scope, mod, dst, src1, true);
-        if (getHardware() >= ngen::HW::XeHP) {
+        if (getProductFamily() >= ngen::PF::XeHP) {
             if (src2.is_reg_data()) {
                 align_src_dst_offset(this, scope, mod, dst, src2);
                 add3(mod, dst.reg_data(), fixup_ternary_rgn(src0.reg_data()),
@@ -566,7 +566,7 @@ public:
             const ngen_operand_t &src0, const ngen_operand_t &src1) {
         if (!src1.is_immediate()) {
             // Immediate src0 is not supported with fdiv_ieee.
-            if (src0.is_immediate() && getHardware() >= ngen::HW::XeHPC) {
+            if (src0.is_immediate() && getProductFamily() >= ngen::PF::XeHPC) {
                 auto tmp_src0 = ra_.alloc_sub(src0.type());
                 mov(mod, tmp_src0, src0.immediate());
                 efdiv(mod, dst,
@@ -618,7 +618,7 @@ public:
         }
 
         // fdiv_ieee() is not supported in XeHPG so we use a less precise, inv-based sequence.
-        if (getHardware() < ngen::HW::XeHPC) {
+        if (getProductFamily() < ngen::PF::XeHPC) {
             auto tmp = ra_.alloc_sub<float>();
             inv(1, tmp, src1.reg_data());
             emul(mod, dst, src0,
@@ -900,9 +900,9 @@ public:
 
         // qot = (x * m) >> p
         bool use_mach = true;
-        if (one_of(hw_info(),
-                    {ngen::HW::XE3P_35_10, ngen::HW::XE3P_35_11,
-                            ngen::HW::XE3P_UNKNOWN}))
+        if (one_of(getProductFamily(),
+                    {ngen::PF::XE3P_35_10, ngen::PF::XE3P_35_11,
+                            ngen::PF::XE3P_UNKNOWN}))
             use_mach = false;
         if (use_mach) {
             auto acc = acc0.retype(div_type);
@@ -919,7 +919,7 @@ public:
             // rem = x - qot * y
             bool y_is_16_bit = (y <= static_cast<uint32_t>(
                                         std::numeric_limits<int16_t>::max()));
-            if (getHardware() >= ngen::HW::XeLP && y_is_16_bit) {
+            if (getProductFamily() >= ngen::PF::XeLP && y_is_16_bit) {
                 mad(mod, rem, x, _qot, -int16_t(y));
             } else {
                 auto tmp = ra_.alloc_sub<uint64_t>();

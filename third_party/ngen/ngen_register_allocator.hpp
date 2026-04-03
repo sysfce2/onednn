@@ -45,51 +45,51 @@ struct Bundle {
     Bundle(int8_t bank_id_, int8_t bundle_id_) : bundle_id(bundle_id_), bank_id(bank_id_) {}
 
     // Number of bundles in each bank (per thread).
-    static constexpr14 int bundleCount(HW hw) {
-        if (hw >= HW::Xe2) return 8;
-        if (hw >= HW::XeHP) return 16;
-        if (hw == HW::Gen12LP) return 8;
+    static constexpr14 int bundleCount(PF pf) {
+        if (pf >= PF::Xe2) return 8;
+        if (pf >= PF::XeHP) return 16;
+        if (pf == PF::XeLP) return 8;
         return 2;
     }
 
     // Number of banks.
-    static constexpr int bankCount(HW hw)      { return 2; }
+    static constexpr int bankCount(PF pf)      { return 2; }
 
-    static inline Bundle locate(HW hw, RegData reg);
+    static inline Bundle locate(PF pf, RegData reg);
 
-    inline int firstReg(HW hw) const;                   // The first register in the bundle.
-    inline int groupSize(HW hw) const;                  // Number of registers in each contiguous group of the bundle.
-    inline int stride(HW hw) const;                     // Stride between register groups of the bundle.
+    inline int firstReg(PF pf) const;                   // The first register in the bundle.
+    inline int groupSize(PF pf) const;                  // Number of registers in each contiguous group of the bundle.
+    inline int stride(PF pf) const;                     // Stride between register groups of the bundle.
 
-    inline uint64_t regMask(HW hw, int offset) const;   // Get register mask for this bundle, for registers [64*offset, 64*(offset+1)).
+    inline uint64_t regMask(PF pf, int offset) const;   // Get register mask for this bundle, for registers [64*offset, 64*(offset+1)).
 
     friend constexpr bool operator==(const Bundle &b1, const Bundle &b2) {
         return b1.bundle_id == b2.bundle_id && b1.bank_id == b2.bank_id;
     }
 
-    static bool conflicts(HW hw, RegData r1, RegData r2) {
-        return !r1.isNull() && !r2.isNull() && (locate(hw, r1) == locate(hw, r2));
+    static bool conflicts(PF pf, RegData r1, RegData r2) {
+        return !r1.isNull() && !r2.isNull() && (locate(pf, r1) == locate(pf, r2));
     }
 
-    static bool sameBank(HW hw, RegData r1, RegData r2) {
-        return !r1.isNull() && !r2.isNull() && (locate(hw, r1).bank_id == locate(hw, r2).bank_id);
+    static bool sameBank(PF pf, RegData r1, RegData r2) {
+        return !r1.isNull() && !r2.isNull() && (locate(pf, r1).bank_id == locate(pf, r2).bank_id);
     }
 
     // Deprecated snake case APIs.
-    static constexpr14 int bundle_count(HW hw)              { return bundleCount(hw); }
-    static constexpr   int bank_count(HW hw)                { return bankCount(hw); }
-    int first_reg(HW hw) const                              { return firstReg(hw); }
-    int group_size(HW hw) const                             { return groupSize(hw); }
-    uint64_t reg_mask(HW hw, int offset) const              { return regMask(hw, offset); }
-    static bool same_bank(HW hw, RegData r1, RegData r2)    { return sameBank(hw, r1, r2); }
+    static constexpr14 int bundle_count(PF pf)              { return bundleCount(pf); }
+    static constexpr   int bank_count(PF pf)                { return bankCount(pf); }
+    int first_reg(PF pf) const                              { return firstReg(pf); }
+    int group_size(PF pf) const                             { return groupSize(pf); }
+    uint64_t reg_mask(PF pf, int offset) const              { return regMask(pf, offset); }
+    static bool same_bank(PF pf, RegData r1, RegData r2)    { return sameBank(pf, r1, r2); }
 };
 
 // A group of register bundles.
 struct BundleGroup {
-    explicit BundleGroup(HW hw_) : hw(hw_) {}
+    explicit BundleGroup(PF pf_) : pf(pf_) {}
 
     static BundleGroup AllBundles() {
-        BundleGroup bg{HW::Gen9};
+        BundleGroup bg{PF::Gen9};
         for (auto &m: bg.regMasks)
             m = ~uint64_t(0);
         return bg;
@@ -98,7 +98,7 @@ struct BundleGroup {
     friend BundleGroup operator|(BundleGroup lhs, Bundle rhs) { lhs |= rhs; return lhs; }
     BundleGroup &operator|=(Bundle rhs) {
         for (size_t rchunk = 0; rchunk < regMasks.size(); rchunk++)
-            regMasks[rchunk] |= rhs.regMask(hw, int(rchunk));
+            regMasks[rchunk] |= rhs.regMask(pf, int(rchunk));
         return *this;
     }
 
@@ -118,16 +118,17 @@ struct BundleGroup {
     uint64_t reg_mask(int rchunk) const { return regMask(rchunk); }
 
 private:
-    HW hw;
+    PF pf;
     std::array<uint64_t, GRF::maxRegs() / 64> regMasks{};
 };
 
 // Gen register allocator.
 class RegisterAllocator {
 public:
-    explicit RegisterAllocator(HW hw_) : hw(hw_) { init(); }
+    explicit RegisterAllocator(PF pf_) : pf(pf_) { init(); }
 
-    HW hardware() const { return hw; }
+    HW hardware() const { return getCore(pf); }
+    PF productFamily() const { return pf; }
 
     // Allocation functions: sub-GRFs, full GRFs, and GRF ranges.
     inline GRFRange allocRange(int nregs, Bundle baseBundle = Bundle(),
@@ -203,7 +204,7 @@ protected:
 
     using mtype = uint16_t;
 
-    HW hw;                                      // HW generation.
+    PF pf;                                      // Product family..
     uint8_t freeGRF[GRF::maxRegs() / 8]{};      // Bitmap of free whole GRFs.
     mtype freeSub[GRF::maxRegs()]{};            // Bitmap of free partial GRFs, at dword granularity.
     uint16_t regCount;                          // # of registers.
@@ -227,24 +228,22 @@ public:
 //  High-level register allocator functions.
 // -----------------------------------------
 
-int Bundle::firstReg(HW hw) const
+int Bundle::firstReg(PF pf) const
 {
     int bundle0 = (bundle_id == any) ? 0 : bundle_id;
     int bank0 = (bank_id == any) ? 0 : bank_id;
 
-    switch (hw) {
+    switch (getCore(pf)) {
         case HW::Gen9:
         case HW::Gen10:
             return (bundle0 << 8) | bank0;
         case HW::Gen11:
             return (bundle0 << 8) | (bank0 << 1);
-        case HW::Gen12LP:
+        case HW::XeLP:
         case HW::XeHPC:
         case HW::Xe2:
         case HW::Xe3:
-        case HW::XE3P_35_10:
-        case HW::XE3P_35_11:
-        case HW::XE3P_UNKNOWN:
+        case HW::Xe3P:
             return (bundle0 << 1) | bank0;
         case HW::XeHP:
         case HW::XeHPG:
@@ -254,11 +253,11 @@ int Bundle::firstReg(HW hw) const
     }
 }
 
-int Bundle::groupSize(HW hw) const
+int Bundle::groupSize(PF pf) const
 {
     if (bundle_id == any && bank_id == any)
         return 128;
-    else switch (hw) {
+    else switch (getCore(pf)) {
         case HW::Gen11:
         case HW::XeHP:
         case HW::XeHPG:
@@ -268,22 +267,20 @@ int Bundle::groupSize(HW hw) const
     }
 }
 
-int Bundle::stride(HW hw) const
+int Bundle::stride(PF pf) const
 {
     if (bundle_id == any && bank_id == any)
         return 128;
-    else switch (hw) {
+    else switch (getCore(pf)) {
         case HW::Gen9:
         case HW::Gen10:
             return 2;
         case HW::Gen11:
             return 4;
-        case HW::Gen12LP:
+        case HW::XeLP:
         case HW::Xe2:
         case HW::Xe3:
-        case HW::XE3P_35_10:
-        case HW::XE3P_35_11:
-        case HW::XE3P_UNKNOWN:
+        case HW::Xe3P:
             return 16;
         case HW::XeHP:
         case HW::XeHPG:
@@ -295,13 +292,13 @@ int Bundle::stride(HW hw) const
     }
 }
 
-uint64_t Bundle::regMask(HW hw, int offset) const
+uint64_t Bundle::regMask(PF pf, int offset) const
 {
     uint64_t bundle_mask = -1, bank_mask = -1, base_mask = -1;
     int bundle0 = (bundle_id == any) ? 0 : bundle_id;
     int bank0   = (bank_id == any)   ? 0 : bank_id;
 
-    switch (hw) {
+    switch (getCore(pf)) {
         case HW::Gen9:
         case HW::Gen10:
             if (bundle_id != any && bundle_id != offset)    bundle_mask = 0;
@@ -311,12 +308,10 @@ uint64_t Bundle::regMask(HW hw, int offset) const
             if (bundle_id != any && bundle_id != offset)    bundle_mask = 0;
             if (bank_id != any)                             bank_mask = 0x3333333333333333 << (bank_id << 1);
             return bundle_mask & bank_mask;
-        case HW::Gen12LP:
+        case HW::XeLP:
         case HW::Xe2:
         case HW::Xe3:
-        case HW::XE3P_35_10:
-        case HW::XE3P_35_11:
-        case HW::XE3P_UNKNOWN:
+        case HW::Xe3P:
             if (bundle_id != any)                           base_mask  = 0x0003000300030003;
             if (bank_id != any)                             base_mask &= 0x5555555555555555;
             return base_mask << (bank0 + (bundle0 << 1));
@@ -334,22 +329,20 @@ uint64_t Bundle::regMask(HW hw, int offset) const
     }
 }
 
-Bundle Bundle::locate(HW hw, RegData reg)
+Bundle Bundle::locate(PF pf, RegData reg)
 {
     int base = reg.getBase();
 
-    switch (hw) {
+    switch (getCore(pf)) {
         case HW::Gen9:
         case HW::Gen10:
             return Bundle(base & 1, base >> 6);
         case HW::Gen11:
             return Bundle((base >> 1) & 1, base >> 6);
-        case HW::Gen12LP:
+        case HW::XeLP:
         case HW::Xe2:
         case HW::Xe3:
-        case HW::XE3P_35_10:
-        case HW::XE3P_35_11:
-        case HW::XE3P_UNKNOWN:
+        case HW::Xe3P:
             return Bundle(base & 1, (base >> 1) & 7);
         case HW::XeHP:
         case HW::XeHPG:
@@ -367,7 +360,8 @@ Bundle Bundle::locate(HW hw, RegData reg)
 
 void RegisterAllocator::init()
 {
-    const int maxRegs = GRF::maxRegs(hw);
+    const int maxRegs = GRF::maxRegs(pf);
+    auto hw = hardware();
 
     fullSubMask = (GRF::bytes(hw) == 32) ? 0xFF : 0xFFFF;
     for (int r = 0; r < maxRegs; r++)
@@ -540,7 +534,8 @@ GRFRange RegisterAllocator::tryAllocRange(int nregs, Bundle baseBundle, BundleGr
     bool ok = false;
 
     for (int rchunk = 0; rchunk < (GRF::maxRegs() >> 6); rchunk++) {
-        uint64_t baseMask = baseBundle.regMask(hw, rchunk);
+        uint64_t baseMask = baseBundle.regMask(pf, rchunk);
+
 
         uint64_t free = freeGRF64[rchunk] & bundleMask.regMask(rchunk);
         uint64_t freeBase = free & baseMask;
@@ -614,7 +609,7 @@ Subregister RegisterAllocator::tryAllocSub(DataType type, Bundle bundle)
 
         for (int rchunk = 0; rchunk < (GRF::maxRegs() >> 6); rchunk++) {
             uint64_t free = searchFullGRF ? freeGRF64[rchunk] : -1;
-            free &= bundle.regMask(hw, rchunk);
+            free &= bundle.regMask(pf, rchunk);
 
             while (free) {
                 int rr = utils::bsf(free);
@@ -662,7 +657,7 @@ FlagRegister RegisterAllocator::tryAllocFlag(bool sub)
 
         return FlagRegister::createFromIndex(idx);
     }
-    for (int r = 0; r < FlagRegister::count(hw); r++) {
+    for (int r = 0; r < FlagRegister::count(hardware()); r++) {
         decltype(freeFlag) mask = (0b11 << 2 * r);
         if ((freeFlag & mask) == mask) {
             freeFlag &= ~mask;
@@ -676,7 +671,7 @@ FlagRegister RegisterAllocator::tryAllocFlag(bool sub)
 void RegisterAllocator::dump(std::ostream &str)
 {
     str << "\nFlag registers: ";
-    for (int r = 0; r < FlagRegister::subcount(hw); r++)
+    for (int r = 0; r < FlagRegister::subcount(hardware()); r++)
         str << char((freeFlag & (1 << r)) ? '.' : 'x');
 
     for (int r = 0; r < regCount; r++) {
@@ -702,7 +697,7 @@ void RegisterAllocator::dump(std::ostream &str)
             str << "Inconsistent bitmaps at r" << r << std::endl;
         if (freeSub[r] != 0x00 && freeSub[r] != fullSubMask) {
             str << " r" << std::setw(3) << r << "   ";
-            for (int s = 0; s < (GRF::bytes(hw) >> 2); s++)
+            for (int s = 0; s < (GRF::bytes(hardware()) >> 2); s++)
                 str << char((freeSub[r] & (1 << s)) ? '.' : 'x');
             str << std::endl;
         }

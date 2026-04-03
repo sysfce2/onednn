@@ -744,6 +744,7 @@ template <HW hw>
 void Generator<hw>::updateC(const GRFMultirange &C_acc, const GRFMultirange &C_accSwap, const GRFMultirange &C_load,
                             const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state)
 {
+    auto pf = getProductFamily();
     auto Ts = problem.Ts;
     auto &alpha = problem.alpha;
     auto &beta = problem.beta;
@@ -777,7 +778,7 @@ void Generator<hw>::updateC(const GRFMultirange &C_acc, const GRFMultirange &C_a
             else if (beta.fixed())
                 stub();                                                                     // beta should be put in a register first.
             else {
-                FOR_EACH_C(mad(esize, acc, alpha1 ? acc : -acc, loaded, vbetar.getRegAvoiding(hw, loaded)));
+                FOR_EACH_C(mad(esize, acc, alpha1 ? acc : -acc, loaded, vbetar.getRegAvoiding(pf, loaded)));
             }
         } else {
             bool neg = false;
@@ -785,14 +786,14 @@ void Generator<hw>::updateC(const GRFMultirange &C_acc, const GRFMultirange &C_a
                 if (betaM1)
                     neg = true;
                 else if (!beta.fixed() && !Ts.isComplex())
-                    FOR_EACH_C(mul(esize, loaded, loaded, vbetar.getRegAvoiding(hw, acc)));
+                    FOR_EACH_C(mul(esize, loaded, loaded, vbetar.getRegAvoiding(pf, acc)));
                 else
                     stub();
             }
             if (alpha.fixed())
                 stub();                                                                     // alpha should be put in a register first.
             else {
-                FOR_EACH_C(mad(esize, acc, neg ? -loaded : loaded, acc, valphar.getRegAvoiding(hw, acc)));
+                FOR_EACH_C(mad(esize, acc, neg ? -loaded : loaded, acc, valphar.getRegAvoiding(pf, acc)));
             }
         }
     } else if (alphaM1)
@@ -802,7 +803,7 @@ void Generator<hw>::updateC(const GRFMultirange &C_acc, const GRFMultirange &C_a
     else if (alpha.fixed())
         stub();                                                                             // alpha should be put in a register first.
     else {
-        FOR_EACH_C(mul(esize, acc, acc, valphar.getRegAvoiding(hw, acc)));
+        FOR_EACH_C(mul(esize, acc, acc, valphar.getRegAvoiding(pf, acc)));
     }
 
     if (useEltwiseInjector(problem)) {
@@ -1610,7 +1611,7 @@ void Generator<hw>::doAlternateCRemainder(COperation op, const GEMMProblem &prob
 
     bool fbfEmulate = (!strategy.systolicAvailable && op == COperation::UpdateStore
             && state.Tacc.real() == Type::f32 && Tc_ext.real() == Type::bf16);
-
+    auto pf = getProductFamily();
     // Vector length in inner loop.
     const auto nbytes = 64;
     auto nec = std::min(nbytes / Tc, nbytes / Tc_ext);
@@ -1686,7 +1687,7 @@ void Generator<hw>::doAlternateCRemainder(COperation op, const GEMMProblem &prob
     bool nonuniformSubs = false;
 
     if (!uniform) {
-        int maxGRFs = (hw == HW::XE3P_35_11 ? 512 : 256);
+        int maxGRFs = (pf == PF::XE3P_35_11 ? 512 : 256);
         std::vector<uint8_t> baseIndices(maxGRFs, 0);
         std::vector<uint16_t> offIndices(maxGRFs, 0);
 
@@ -2153,7 +2154,7 @@ void Generator<hw>::convert(const GRFMultirange &range, Type Told, Type Tnew, co
     // Special path: s16->bf16.
     if (Told == Type::s16 && Tnew == Type::bf16) {
         int ne = elementsPerGRF<uint16_t>(hw);
-        CopyPlan plan(hw, strategy.systolicAvailable);
+        CopyPlan plan(getProductFamily(), strategy.systolicAvailable);
         for(int i = 0; i < range.getLen(); i++) {
             CopyOperand sOp(range[i]), dOp(sOp);
             sOp.type = Told.ngen();
@@ -2271,7 +2272,7 @@ void Generator<hw>::gemmAccessSums(COperation op, const GEMMProblem &problem, co
             else if (beta.fixed())
                 mad(esize, acc, acc, loaded, cast(Tc.real(), beta));
             else
-                mad(esize, acc, acc, loaded, state.inputs.beta_real.getRegAvoiding(hw, acc));
+                mad(esize, acc, acc, loaded, state.inputs.beta_real.getRegAvoiding(getProductFamily(), acc));
         });
 
         if (!loadOnly)
@@ -2338,7 +2339,7 @@ void Generator<hw>::gemmKReduce(const GEMMProblem &problem, const GEMMStrategy &
     if (maxMNThreads <= 0) stub("Max workgroup size not specified");
 
     int regs = C_regs.getLen();
-    int sliceRegs = int(gemmPerKSLMSize(hw, problem, strategy) / (maxMNThreads * GRF::bytes(hw)));
+    int sliceRegs = int(gemmPerKSLMSize(getProductFamily(), problem, strategy) / (maxMNThreads * GRF::bytes(hw)));
     if (sliceRegs <= 0) stub("Not enough SLM for k reduction");
     sliceRegs = std::min<int>(sliceRegs, C_regs.getLen());
 

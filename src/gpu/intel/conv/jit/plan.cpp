@@ -1355,8 +1355,8 @@ struct fma_context_t {
         bool is_dpas = is_dp_fma(fma);
         bool is_a = (abc == abc_kind_t::a);
         auto type = (is_a ? a_type : b_type);
-        bool cvt_f16 = ((hw < ngen::HW::XE3P_35_10 && layout.type().is_fp8())
-                || (hw < ngen::HW::XE3P_35_11 && layout.type().is_fp4()));
+        bool cvt_f16 = ((hw < ngen::PF::XE3P_35_10 && layout.type().is_fp8())
+                || (hw < ngen::PF::XE3P_35_11 && layout.type().is_fp4()));
         int type_size = (cvt_f16 ? 2 : type.size());
         if (is_dpas) {
             int sdepth = 8;
@@ -2267,7 +2267,7 @@ private:
         if (!use_prefetch(abc)) return plan_status_t::success;
         auto &tg = cfg_.thread_group_grid();
         auto thr_view = tg_view.split(tg, &grid);
-        if (cfg_.hw() == ngen::HW::XE3P_35_11) {
+        if (cfg_.hw() == ngen::PF::XE3P_35_11) {
             maybe_extend_prefetch_thread_view_to_256_bytes(thr_view);
         }
         auto params = get_send_params(cfg_.options(), send_op_t::prefetch,

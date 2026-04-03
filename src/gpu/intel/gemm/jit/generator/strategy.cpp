@@ -29,21 +29,21 @@ using namespace ngen;
 
 
 /* CommonStrategy member functions */
-CommonStrategy::CommonStrategy(HW hw, int stepping) : raHW(hw), emulate(hw, stepping)
+CommonStrategy::CommonStrategy(PF pf, int stepping) : raHW(pf), emulate(ngen::getCore(pf), stepping)
 {
-    fused = one_of(hw, {HW::Gen12LP, HW::XeHP, HW::XeHPG});
-    systolicAvailable = (hw >= HW::XeHP);
+    fused = ngen::getCore(pf) >= ngen::HW::Xe3P;
+    systolicAvailable = (ngen::getCore(pf) >= ngen::HW::XeHP);
 }
 
-void CommonStrategy::preflight(HW hw, const CommonProblem &problem)
+void CommonStrategy::preflight(PF pf, const CommonProblem &problem)
 {
-    subgroupSize = std::max(subgroupSize, GRF::bytes(hw) >> 2);
+    subgroupSize = std::max(subgroupSize, GRF::bytes(ngen::getCore(pf)) >> 2);
     readSuppressionWA &= fused;
 
     bool emulateNeedsAcc = emulate.emulate64 || emulate.emulateDWxDW || emulate.emulate64_mul;
     if (moveR0 == MoveR0::Acc && emulateNeedsAcc)
         moveR0 = MoveR0::None;
-    if (hw >= HW::XE3P_35_10) moveR0 = MoveR0::None;
+    if (ngen::getCore(pf) >= HW::Xe3P) moveR0 = MoveR0::None;
 
     spf &= !fused;
 }
@@ -93,10 +93,12 @@ bool useAutoAtomic(HW hw, const GEMMProblem &problem, const GEMMStrategy &strate
 }
 
 // Validate a GEMM strategy, correcting settings as necessary.
-void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
+void GEMMStrategy::preflight(PF pf, const GEMMProblem &problem)
 {
     auto Ta = problem.Ta, Tb = problem.Tb, Tc = problem.Tc, Tc_ext = problem.Tc_ext;
     auto Ta_real = Ta.real();
+
+    auto hw = ngen::getCore(pf);
 
     // Safety checks for alignment.
     if (!legalAAlignment(problem, problem.A.alignment))
@@ -106,7 +108,7 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
 
     // Addressing preflight.
 
-    if (hw >= HW::Xe2) for (auto *s: {&A, &B, &C, &AO, &BO, &CO, &A_scale, &B_scale,
+    if (pf >= PF::GenericXe2) for (auto *s: {&A, &B, &C, &AO, &BO, &CO, &A_scale, &B_scale,
                                       &A_prefetch, &B_prefetch, &C_prefetch, &AB_prefetchL3})
         s->newDP = true;
 
@@ -166,18 +168,18 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     slmA &= (slmBuffers > 0);
     slmB &= (slmBuffers > 0);
 
-    A.preflight(hw); A_prefetch.preflight(hw); AO.preflight(hw);
-    B.preflight(hw); B_prefetch.preflight(hw); BO.preflight(hw);
-    C.preflight(hw); C_prefetch.preflight(hw); CO.preflight(hw);
-    A_scale.preflight(hw); Ag.preflight(hw);
-    B_scale.preflight(hw); Bg.preflight(hw);
-    AB_prefetchL3.preflight(hw);
+    A.preflight(pf); A_prefetch.preflight(pf); AO.preflight(pf);
+    B.preflight(pf); B_prefetch.preflight(pf); BO.preflight(pf);
+    C.preflight(pf); C_prefetch.preflight(pf); CO.preflight(pf);
+    A_scale.preflight(pf); Ag.preflight(pf);
+    B_scale.preflight(pf); Bg.preflight(pf);
+    AB_prefetchL3.preflight(pf);
 
     bool globalCM = isRegisterColMajor(problem.Tc, problem.C, C);
 
     altCRemainder &= (Tc_ext.bits() >= 8);
 
-    block2DCRemainder &= (hw >= HW::XeHPC);
+    block2DCRemainder &= (pf >= PF::GenericXeHPC);
     block2DCRemainder &= !isPacked(problem.C.layout);
     block2DCRemainder &= !isBlock2D(C.accessType);
     auto X = unroll[isTransposing(C.accessType) ? LoopN : LoopM];
@@ -197,7 +199,7 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
         fmaSIMD = std::min(32, 2 * GRF::bytes(hw) / std::max<int>({Ta.paddedSize(), Tb.paddedSize(), Tc.paddedSize()}));
     }
 
-    slmFenceWARWA |= (hw >= HW::XeHPG);
+    slmFenceWARWA |= (pf >= PF::GenericXeHPG);
 
     if (problem.batch != BatchMode::None) {
         persistent = false;
@@ -209,7 +211,7 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
 
     checkBeta1 |= C.atomic && !problem.beta1();
 
-    GRFs = std::min(GRFs, GRF::maxRegs(hw));
+    GRFs = std::min(GRFs, GRF::maxRegs(pf));
 
     // Fixed systolic kernel handling.
     if (fixedSystolic) {
@@ -238,7 +240,9 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     if (AccumulatorRegister::count(hw, GRFs, problem.Tc.real().ngen()) == 0)
         kChain = 1;
     // Using acc and mad not working on xe3p
-    bool is_xe3p = one_of(hw, {ngen::HW::XE3P_35_10, ngen::HW::XE3P_35_11, ngen::HW::XE3P_UNKNOWN});
+    bool is_xe3p = one_of(pf,
+            {ngen::PF::XE3P_35_10, ngen::PF::XE3P_35_11,
+                    ngen::PF::XE3P_UNKNOWN});
     if (!systolic && !dotVL && is_xe3p)
         kChain = 1;
     cAccumulators &= (kChain == 1);
@@ -257,8 +261,8 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     checkAdd32 &= (A.base.isStateless() || B.base.isStateless() || problem.quantized2DA() || problem.quantized2DB());
     checkAdd32 &= !(A.address2D && B.address2D && (!prefetchA || A_prefetch.address2D) && (!prefetchB || B_prefetch.address2D));
 
-    int opCount = outerProductCount(hw, problem, *this);
-    int minOPCount = minOuterProductCount(hw, problem, *this);
+    int opCount = outerProductCount(pf, problem, *this);
+    int minOPCount = minOuterProductCount(pf, problem, *this);
     int ukAlign = opCount;
 
     if (kParallelLocal)
@@ -291,7 +295,7 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
 
     // Systolic handling.
     if (systolic) {
-        auto params = systolicParams(hw, problem);
+        auto params = systolicParams(pf, problem);
 
         ukAlign = lcm(ukAlign, params.ksys);
         auto tileX = params.osys;
@@ -320,7 +324,7 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
 
     // Propagate tiling requests to strategy.
     int tileM_A, tileK_A, tileK_B, tileN_B;
-    std::tie(tileM_A, tileK_A, tileK_B, tileN_B) = targetKernelTiling(hw, problem, *this);
+    std::tie(tileM_A, tileK_A, tileK_B, tileN_B) = targetKernelTiling(pf, problem, *this);
     if (A.accessType != AccessType::Block) {
         if (tileM_A && !A.tileR) A.tileR = tileM_A;
         if (tileK_A && !A.tileC) A.tileC = tileK_A;
@@ -331,7 +335,7 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     }
 
     if (dpasw) {
-        auto params = systolicParams(hw, problem);
+        auto params = systolicParams(pf, problem);
         if (globalCM) {
             if (!fusedM()) stub();
             B.dpasw = true;
@@ -429,7 +433,7 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     if (blocking[LoopM] <= 0) blocking[LoopM] = defaultMBlock;
     if (blocking[LoopN] <= 0) blocking[LoopN] = defaultNBlock;
     if (blocking[LoopK] <= 0) {
-        if (hw >= HW::XeHPG)
+        if (pf >= PF::GenericXeHPG)
             blocking[LoopK] = 16777216;
         else {
             int points = 1;
@@ -487,14 +491,14 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     if (fixedWG(problem) && (!kParallelLocal || fixedWGK()))
         activeThreads = wg[LoopM] * wg[LoopN] * wg[LoopK] * (splitCopy ? 2 : 1);
 
-    CommonStrategy::preflight(hw, problem);
+    CommonStrategy::preflight(pf, problem);
 }
 
 // Reduce register pressure. Returns true if successful.
-bool GEMMStrategy::minimize(HW hw, const GEMMProblem &problem)
+bool GEMMStrategy::minimize(PF pf, const GEMMProblem &problem)
 {
     bool better = false;
-    auto minOPCount = minOuterProductCount(hw, problem, *this);
+    auto minOPCount = minOuterProductCount(pf, problem, *this);
     auto ka_load_best_min = std::max<int>({1, 4 / problem.Ta, minOPCount});
     auto kb_load_best_min = std::max<int>({1, 4 / problem.Tb, minOPCount});
 
@@ -519,7 +523,7 @@ bool GEMMStrategy::minimize(HW hw, const GEMMProblem &problem)
         auto oldUK = unroll[LoopK];
         unroll[LoopK] = 1;
         unrollKSLM = 0;
-        preflight(hw, problem);
+        preflight(pf, problem);
         better |= (unroll[LoopK] < oldUK);
     }
 
@@ -585,9 +589,9 @@ bool GEMMStrategy::nondeterministic(const GEMMProblem &problem) const {
     return false;
 }
 
-void MatrixAddressingStrategy::preflight(HW hw)
+void MatrixAddressingStrategy::preflight(PF pf)
 {
-    newDP |= isBlock2D(accessType) || (hw >= HW::Xe2);
+    newDP |= isBlock2D(accessType) || (pf >= PF::Xe2);
     padded |= (base.getModel() == ModelSLM);
 
     if (prefetch && newDP && cachingR == CacheSettingsLSC::Default)
@@ -628,9 +632,9 @@ void downgradeBPFAccess(const GEMMProblem &problem, GEMMStrategy &strategy)
                       problem.B.layout == MatrixLayout::N, strategy.unroll[LoopN] * problem.Tb_ext);
 }
 
-void GEMMStrategy::trimKChain(HW hw, int k, const GEMMProblem &problem)
+void GEMMStrategy::trimKChain(PF pf, int k, const GEMMProblem &problem)
 {
-    int minOPCount = minOuterProductCount(hw, problem, *this);
+    int minOPCount = minOuterProductCount(pf, problem, *this);
     kChain = gcd(kChain, k / minOPCount);
 }
 

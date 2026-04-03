@@ -30,7 +30,7 @@ GEMMSTONE_NAMESPACE_START
 size_t gemmSLMSize(ngen::HW hw, const GEMMProblem &problem, const GEMMStrategy &strategy, bool computeMax = false);
 
 // Return amount of per-k SLM needed by a GEMM kernel.
-size_t gemmPerKSLMSize(ngen::HW hw, const GEMMProblem &problem, const GEMMStrategy &strategy);
+size_t gemmPerKSLMSize(ngen::PF pf, const GEMMProblem &problem, const GEMMStrategy &strategy);
 
 // Decide whether C layout needs m/n remainder handling.
 void getCRemainders(ngen::HW hw, const GEMMProblem &problem, const GEMMStrategy &strategy, bool &remM_C, bool &remN_C);

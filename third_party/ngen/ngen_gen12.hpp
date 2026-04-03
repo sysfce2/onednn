@@ -35,9 +35,7 @@ template <> struct EncodingTag12Dispatch<HW::Xe2>   { using tag = EncodingTagXeH
 template <> struct EncodingTag12Dispatch<HW::Xe3>   { using tag = EncodingTagXeHPC; };
 struct EncodingTagXe3p : public EncodingTagXeHPC {};
 
-template <> struct EncodingTag12Dispatch<HW::XE3P_35_10>  { using tag = EncodingTagXe3p; };
-template <> struct EncodingTag12Dispatch<HW::XE3P_35_11>  { using tag = EncodingTagXe3p; };
-template <> struct EncodingTag12Dispatch<HW::XE3P_UNKNOWN>  { using tag = EncodingTagXe3p; };
+template <> struct EncodingTag12Dispatch<HW::Xe3P>  { using tag = EncodingTagXe3p; };
 
 class SWSBInfo12
 {
@@ -1154,6 +1152,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
     bool unaryXe3p = false;
 
     auto hw = region.hw;
+    auto pf = region.pf;
     auto op = opcode();
     RegData rd;
 
@@ -1176,7 +1175,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                     o.bits = binary.dst;
                     unsigned regNum = o.direct.regNum;
                     if (xe3p) regNum |= (binaryXe3p.dstReg8 << 8);
-                    region = DependencyRegion(hw, 1, GRF(regNum));
+                    region = DependencyRegion(pf, 1, GRF(regNum));
                     return true;
                 }
                 case 0: {
@@ -1188,7 +1187,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                         rn0 |= (binaryXe3p.src0Reg8 << 8);
                         rn1 |= (binaryXe3p.src1Reg8 << 8);
                     }
-                    region = DependencyRegion(hw, GRF(rn0)-GRF(rn1));
+                    region = DependencyRegion(pf, GRF(rn0)-GRF(rn1));
                     return true;
                 }
                 default: return false;
@@ -1262,7 +1261,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
 
             unsigned regNum = o.direct.regNum;
             if (xe3p) regNum |= (regNum8 << 8);
-            region = DependencyRegion(hw, GRFRange(regNum, len));
+            region = DependencyRegion(pf, GRFRange(regNum, len));
             return true;
         }
         case Opcode::send:
@@ -1270,12 +1269,12 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
             int base = 0, len = 0;
             if (send.src0RegFile == RegFileARF && hw >= HW::Xe3) switch (opNum) {
                 case 0:
-                    region = DependencyRegion(hw);
+                    region = DependencyRegion(pf);
                     return true;
                     break;
                 case 1: {
                     /* report s0 dependency as if it came from src1 */
-                    region = DependencyRegion(hw, send.desc25_29 & 0xF, ScalarRegister(0)[send.exDesc6_10 << 1](1));
+                    region = DependencyRegion(pf, send.desc25_29 & 0xF, ScalarRegister(0)[send.exDesc6_10 << 1](1));
                     return true;
                     break;
                 }
@@ -1306,20 +1305,20 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
             if (len == 0)
                 return false;
             else if (len == -1)
-                region = DependencyRegion(hw);
+                region = DependencyRegion(pf);
             else
-                region = DependencyRegion(hw, GRFRange(base, len));
+                region = DependencyRegion(pf, GRFRange(base, len));
             return true;
         }
         case Opcode::sendg:
         case Opcode::sendgc: {
             if (send.src0RegFile == RegFileARF && (sendg.src0Reg >> 4) == 0x6) switch (opNum) {
                 case 0:
-                    region = DependencyRegion(hw);
+                    region = DependencyRegion(pf);
                     return true;
                 case 1: {
                     /* report s0 dependency as if it came from src1 */
-                    region = DependencyRegion(hw, sendg.src0Len, ScalarRegister(0)[(send.src0Reg & 0xF) << 1](1));
+                    region = DependencyRegion(pf, sendg.src0Len, ScalarRegister(0)[(send.src0Reg & 0xF) << 1](1));
                     return true;
                 }
                 default: break;
@@ -1329,18 +1328,18 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                     if (sendg.dstRegFile == RegFileARF) return false;
                     int dstLen = getSendgDesc().dstLen(hw, 1 << common.execSize, static_cast<SharedFunction>(sendg.sfid));
                     if (dstLen == -1)
-                        region = DependencyRegion(hw);
+                        region = DependencyRegion(pf);
                     else
-                        region = DependencyRegion(hw, GRFRange(sendg.dstReg, dstLen));
+                        region = DependencyRegion(pf, GRFRange(sendg.dstReg, dstLen));
                     break;
                 }
                 case 0:
                     if (sendg.src0RegFile == RegFileARF) return false;
-                    region = DependencyRegion(hw, GRFRange(sendg.src0Reg, sendg.src0Len));
+                    region = DependencyRegion(pf, GRFRange(sendg.src0Reg, sendg.src0Len));
                     break;
                 case 1:
                     if (sendg.src1RegFile == RegFileARF) return false;
-                    region = DependencyRegion(hw, GRFRange(sendg.src1Reg, sendg.src1Len));
+                    region = DependencyRegion(pf, GRFRange(sendg.src1Reg, sendg.src1Len));
                     break;
                 default: return false;
             }
@@ -1368,9 +1367,9 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
             if (regNum == 0x1FF)
                 return false;
             else if (len == -1)
-                region = DependencyRegion(hw);
+                region = DependencyRegion(pf);
             else
-                region = DependencyRegion(hw, GRFRange(regNum, len));
+                region = DependencyRegion(pf, GRFRange(regNum, len));
             return true;
         }
         case Opcode::dp4a:
@@ -1497,7 +1496,7 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
                     break;
                 default: return false;
             }
-            if (o.direct.addrMode) { region = DependencyRegion(hw); return true; } // indirect
+            if (o.direct.addrMode) { region = DependencyRegion(pf); return true; } // indirect
             if (isMathMacro())
                 o.direct.subRegNum = 0;
             auto sr = xeHPC ? ((o.direct.subRegNum << 1) | o.directXeHPC.subRegNum0)
@@ -1533,8 +1532,8 @@ bool Instruction12::getOperandRegion(autoswsb::DependencyRegion &region, int opN
     }
 
     auto esize = 1 << ((hw >= HW::XeHPC) ? commonXeHPC.execSize : common.execSize);
-    rd.fixup(hw, esize, 0, DataType::invalid, opNum, 2);
-    region = DependencyRegion(hw, esize, rd);
+    rd.fixup(pf, esize, 0, DataType::invalid, opNum, 2);
+    region = DependencyRegion(pf, esize, rd);
     if (op == Opcode::mullh) region.duplicateLH();
     return true;
 }
@@ -1578,7 +1577,7 @@ bool Instruction12::getCModDepRegion(autoswsb::DependencyRegion &region) const
     auto flag = FlagRegister::createFromIndex(flagn);
     if (lg2ES >= 5)
         flag.setType(DataType::ud);
-    region = autoswsb::DependencyRegion(region.hw, 1, flag);
+    region = autoswsb::DependencyRegion(region.pf, 1, flag);
 
     return true;
 }

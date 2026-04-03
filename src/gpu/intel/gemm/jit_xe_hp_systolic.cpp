@@ -580,7 +580,7 @@ status_t xe_hp_systolic_t::init_compute(impl::engine_t *engine) {
 
     bool is_integrated = intel_engine->device_info()->is_integrated();
 
-    auto status = kd_full.select_kernel(arch_, stepping, eu_count_,
+    auto status = kd_full.select_kernel(arch_, intel_engine->device_info()->ngen_pf(), stepping, eu_count_,
             is_integrated, pd()->with_batch(), pd()->packed_c(), trans_co,
             pd()->with_a_zero_points(), pd()->with_b_zero_points(),
             pd()->with_c_zero_points(), pd()->with_bias(), pd()->alpha(),
@@ -618,7 +618,7 @@ status_t xe_hp_systolic_t::init_compute(impl::engine_t *engine) {
 
                 kd_t kd;
 
-                auto status = kd.select_kernel(arch_, stepping, eu_count_,
+                auto status = kd.select_kernel(arch_, intel_engine->device_info()->ngen_pf(), stepping, eu_count_,
                         is_integrated, pd()->with_batch(), pd()->packed_c(),
                         trans_co, pd()->with_a_zero_points(),
                         pd()->with_b_zero_points(), this_c_offset,

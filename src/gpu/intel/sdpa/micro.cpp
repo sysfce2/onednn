@@ -1172,16 +1172,15 @@ status_t micro_fwd_params_t::get_kernel_ctx(
         if (!newStrat.empty()) {
             // Example: 16 16 aT32 aM32 aB wg 2x4 sys
             auto product = ngen::npack::decodeHWIPVersion(hw_info.gmdid);
-            auto hw = getCore(product.family);
             auto stepping = hw_info.gmdid & 0xFF;
-            strat = gemmstone::GEMMStrategy(hw, stepping);
+            strat = gemmstone::GEMMStrategy(product.family, stepping);
             std::stringstream ss(newStrat);
             ss >> strat.unroll[0];
             ss >> strat.unroll[1];
             std::string strategyString;
             std::getline(ss >> std::ws, strategyString);
-            parseStrategy(strategyString.c_str(), hw, problem_kq, strat);
-            adjustStrategy(hw, problem_kq, strat);
+            parseStrategy(strategyString.c_str(), product.family, problem_kq, strat);
+            adjustStrategy(product.family, problem_kq, strat);
         }
     };
     try {
@@ -1200,16 +1199,15 @@ status_t micro_fwd_params_t::get_kernel_ctx(
         if (!newStrat.empty()) {
             // Example: 16 16 aT32 aM32 aB wg 2x4 sys
             auto product = ngen::npack::decodeHWIPVersion(hw_info.gmdid);
-            auto hw = getCore(product.family);
             auto stepping = hw_info.gmdid & 0xFF;
-            strat = gemmstone::GEMMStrategy(hw, stepping);
+            strat = gemmstone::GEMMStrategy(product.family, stepping);
             std::stringstream ss(newStrat);
             ss >> strat.unroll[0];
             ss >> strat.unroll[1];
             std::string strategyString;
             std::getline(ss >> std::ws, strategyString);
-            parseStrategy(strategyString.c_str(), hw, problem_vs, strat);
-            adjustStrategy(hw, problem_vs, strat);
+            parseStrategy(strategyString.c_str(), product.family, problem_vs, strat);
+            adjustStrategy(product.family, problem_vs, strat);
         }
     };
     try {

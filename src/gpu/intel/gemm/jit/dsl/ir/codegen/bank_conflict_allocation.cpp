@@ -34,8 +34,8 @@ namespace {
 
 // Helper structure to access HW-specific information.
 struct hw_context_t {
-    hw_context_t(ngen::HW hw, int regs)
-        : hw(hw), regs(regs), reg_size(ngen::GRF::bytes(hw)) {
+    hw_context_t(ngen::PF pf_, int regs)
+        : pf(pf_), hw(getCore(pf_)), regs(regs), reg_size(ngen::GRF::bytes(getCore(pf_))) {
         int bank0 = reg_bank(0);
         for (int i = 1; i < regs; i++)
             if (reg_bank(i) != bank0) {
@@ -44,8 +44,8 @@ struct hw_context_t {
             }
         dsl_assert(reg_bank_stride != -1);
 
-        bank_masks.resize(ngen::Bundle::bank_count(hw));
-        bundle_masks.resize(ngen::Bundle::bundle_count(hw));
+        bank_masks.resize(ngen::Bundle::bank_count(pf));
+        bundle_masks.resize(ngen::Bundle::bundle_count(pf));
 
         for (int i = 0; i < regs; i++) {
             int bank = reg_bank(i);
@@ -58,38 +58,37 @@ struct hw_context_t {
                 int j = (i % 64);
                 dsl_assert((bank_masks[bank] & (1ull << j)) != 0);
                 // XeLP only has two bundles
-                if (hw > ngen::HW::XeLP)
+                if (pf > ngen::PF::XeLP)
                     dsl_assert((bundle_masks[bundle] & (1ull << j)) != 0);
             }
         }
     }
 
     int reg_bank(int reg) const {
-        auto bundle = ngen::Bundle::locate(hw, ngen::GRF(reg));
+        auto bundle = ngen::Bundle::locate(pf, ngen::GRF(reg));
         return bundle.bank_id;
     }
 
     int reg_bundle(int reg) const {
-        auto bundle = ngen::Bundle::locate(hw, ngen::GRF(reg));
+        auto bundle = ngen::Bundle::locate(pf, ngen::GRF(reg));
         return bundle.bundle_id;
     }
 
     int hw_simd() const {
-        switch (hw) {
-            case ngen::HW::XeLP:
-            case ngen::HW::XeHP:
-            case ngen::HW::XeHPG: return 8;
-            case ngen::HW::XeHPC:
-            case ngen::HW::Xe2:
-            case ngen::HW::Xe3:
-            case ngen::HW::XE3P_35_10:
-            case ngen::HW::XE3P_35_11:
-            case ngen::HW::XE3P_UNKNOWN: return 16;
+        switch (pf) {
+            case ngen::PF::XeLP:
+            case ngen::PF::XeHP:
+            case ngen::PF::XeHPG: return 8;
+            case ngen::PF::XeHPC:
+            case ngen::PF::Xe2:
+            case ngen::PF::Xe3:
+            case ngen::PF::Xe3P: return 16;
             default: gpu_error_not_expected();
         }
         return -1;
     }
 
+    ngen::PF pf;
     ngen::HW hw;
     int regs; // Number of registers.
     int reg_size; // Size of register in bytes.
@@ -630,7 +629,7 @@ reg_mask_t create_available_reg_mask(
 bank_conflict_allocation_t bank_conflict_allocation_t::create(
         reg_allocator_t &ra, const bank_conflict_attr_t &attr) {
     int regs = ra.getRegisterCount();
-    hw_context_t hw_ctx(ra.hardware(), regs);
+    hw_context_t hw_ctx(ra.productFamily(), regs);
     dsl_assert(regs <= reg_mask_t::max_regs);
 
     bool is_dpas = false;

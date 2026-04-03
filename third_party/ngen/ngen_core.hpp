@@ -257,9 +257,7 @@ enum class Core {
     Gen12p8 = XeHPC,    /* Deprecated -- will be removed in the future */
     Xe2,
     Xe3,
-    XE3P_35_10,
-    XE3P_35_11,
-    XE3P_UNKNOWN,
+    Xe3P,
 };
 
 typedef Core HW;
@@ -270,27 +268,39 @@ typedef Core HW;
 enum class ProductFamily : int {
     Unknown,
     GenericGen9,
+    Gen9 = GenericGen9,
     GenericGen10,
+    Gen10 = GenericGen10,
     GenericGen11,
+    Gen11 = GenericGen11,
     GenericXeLP,
+    XeLP = GenericXeLP,
     GenericGen12LP = GenericXeLP,
     GenericXeHP,
+    XeHP = GenericXeHP,
     GenericXeHPG,
+    XeHPG = GenericXeHPG,
     DG2,
     MTL,
     ARL,
     GenericXeHPC,
+    XeHPC = GenericXeHPC,
     PVC,
     PVCVG,
     GenericXe2,
+    Xe2 = GenericXe2,
     BMG,
     LNL,
     GenericXe3,
-    GenericXe3p,
+    Xe3 = GenericXe3,
+    GenericXe3P,
+    Xe3P = GenericXe3P,
     XE3P_35_10,
     XE3P_35_11,
     XE3P_UNKNOWN,
 };
+
+typedef ProductFamily PF;
 
 enum class PlatformType {Unknown, Integrated, Discrete};
 
@@ -323,7 +333,7 @@ static inline constexpr14 PlatformType getPlatformType(ProductFamily family) {
         case ProductFamily::GenericXeHPG:
         case ProductFamily::GenericXe2:
         case ProductFamily::GenericXe3:
-        case ProductFamily::GenericXe3p:
+        case ProductFamily::GenericXe3P:
         case ProductFamily::XE3P_UNKNOWN:
             return PlatformType::Unknown;
         // Guaranteed discrete
@@ -353,19 +363,33 @@ static inline constexpr14 ProductFamily genericProductFamily(HW hw)
         case HW::XeHPC: return ProductFamily::GenericXeHPC;
         case HW::Xe2:   return ProductFamily::GenericXe2;
         case HW::Xe3:   return ProductFamily::GenericXe3;
-        case HW::XE3P_35_10:
-        case HW::XE3P_35_11:
-        case HW::XE3P_UNKNOWN: return ProductFamily::GenericXe3p;
+        case HW::Xe3P:   return ProductFamily::GenericXe3P;
         default:        return ProductFamily::Unknown;
+    }
+}
+
+
+static inline constexpr14 ngen::PF productFamily(ngen::HW hw_)
+{
+    using namespace ngen;
+    switch (hw_) {
+        case HW::Gen9:  return PF::GenericGen9;
+        case HW::Gen10: return PF::GenericGen10;
+        case HW::Gen11: return PF::GenericGen11;
+        case HW::XeLP: return PF::GenericXeLP;
+        case HW::XeHP: return PF::GenericXeHP;
+        case HW::XeHPG: return PF::GenericXeHPG;
+        case HW::XeHPC: return PF::GenericXeHPC;
+        case HW::Xe2: return PF::GenericXe2;
+        case HW::Xe3: return PF::GenericXe3;
+        case HW::Xe3P: return PF::Xe3P;
+        default: return PF::Unknown;
     }
 }
 
 static inline constexpr14 Core getCore(ProductFamily family)
 {
-    if (family >= ProductFamily::XE3P_UNKNOWN)  return Core::XE3P_UNKNOWN;
-    if (family >= ProductFamily::XE3P_35_11)  return Core::XE3P_35_11;
-    if (family >= ProductFamily::XE3P_35_10)  return Core::XE3P_35_10;
-    if (family >= ProductFamily::GenericXe3p) return Core::XE3P_35_10;
+    if (family >= ProductFamily::GenericXe3P) return Core::Xe3P;
     if (family >= ProductFamily::GenericXe3)   return Core::Xe3;
     if (family >= ProductFamily::GenericXe2)   return Core::Xe2;
     if (family >= ProductFamily::GenericXeHPC) return Core::XeHPC;
@@ -527,7 +551,7 @@ enum class MathFunction : uint8_t {
 
 static inline int mathArgCount(HW hw, MathFunction func)
 {
-    if (hw >= HW::XE3P_35_10) {
+    if (hw >= HW::Xe3P) {
         static const char argCounts[16] = {0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 2, 2, 2, 2, 1};
         return argCounts[static_cast<uint8_t>(func) & 0xF];
     }
@@ -755,7 +779,7 @@ public:
     }
 
     /* for compatibility with RegData */
-    void fixup(HW hw, int execSize, int execWidth, DataType defaultType, int srcN, int arity) {}
+    void fixup(PF pf, int execSize, int execWidth, DataType defaultType, int srcN, int arity) {}
     constexpr DataType getType() const { return DataType::invalid; }
     constexpr bool isScalar() const { return false; }
 
@@ -864,7 +888,7 @@ public:
     void invalidate()                     { invalid = true; }
     RegData &operator=(const Invalid &i)  { this->invalidate(); return *this; }
 
-    inline void fixup(HW hw, int execSize, int execWidth, DataType defaultType, int srcN, int arity);                    // Adjust automatically-computed strides given ESize.
+    inline void fixup(PF pf, int execSize, int execWidth, DataType defaultType, int srcN, int arity);                    // Adjust automatically-computed strides given ESize.
 
     constexpr RegData operator+() const { return *this; }
     constexpr14 RegData operator-() const {
@@ -902,13 +926,13 @@ inline RegData abs(const RegData &r)
 }
 
 // Forward declare
-static constexpr int maxRegs(HW hw);
+static constexpr int maxRegs(PF pf);
 
-inline void RegData::fixup(HW hw, int execSize, int execWidth, DataType defaultType, int srcN, int arity)
+inline void RegData::fixup(PF pf, int execSize, int execWidth, DataType defaultType, int srcN, int arity)
 {
 #ifdef NGEN_SAFE
     if (isInvalid()) throw invalid_object_exception();
-    if (!isARF() && !isIndirect() && static_cast<int>(base) >= maxRegs(hw)) throw grf_out_of_bounds_exception();
+    if (!isARF() && !isIndirect() && static_cast<int>(base) >= maxRegs(pf)) throw grf_out_of_bounds_exception();
 #endif
 
     if (getType() == DataType::invalid) {
@@ -926,7 +950,7 @@ inline void RegData::fixup(HW hw, int execSize, int execWidth, DataType defaultT
             int maxWidth = 32 / getBytes();
             width = (hs == 0) ? 1 : std::min<int>({int(maxWidth / hs), execSize, 16});
             vs = width * hs;
-            if (arity == 3 && hw >= HW::Gen12LP && vs == 2 && srcN >= 0 && srcN < 2) {
+            if (arity == 3 && pf >= PF::XeLP && vs == 2 && srcN >= 0 && srcN < 2) {
 #ifdef NGEN_SAFE
                 if (hs != 1) throw invalid_region_exception();
 #endif
@@ -994,8 +1018,8 @@ public:
     bool isValid()                        const { return !rd.isInvalid(); }
     constexpr bool isScalar()             const { return rd.isScalar(); }
 
-    void fixup(HW hw, int execSize, int execWidth, DataType defaultType, int srcN, int arity) {
-        rd.fixup(hw, execSize, execWidth, defaultType, srcN, arity);
+    void fixup(PF pf, int execSize, int execWidth, DataType defaultType, int srcN, int arity) {
+        rd.fixup(pf, execSize, execWidth, defaultType, srcN, arity);
     }
 
 #ifdef NGEN_ASM
@@ -1298,15 +1322,15 @@ public:
     static constexpr int bytesToGRFs(HW hw, unsigned x)    { return (x + bytes(hw) - 1) >> log2Bytes(hw); }
 
     static constexpr int maxRegs()                         { return 512; }
-    static constexpr int maxRegs(HW hw) {
-        return (hw < HW::XeHP) ? 128
-            : (hw == HW::XE3P_35_11) ? 512
+    static constexpr int maxRegs(PF pf) {
+        return (pf < PF::GenericXeHP) ? 128
+            : (pf == PF::XE3P_35_11) ? 512
             : 256;
     }
 };
 
-static constexpr int maxRegs(HW hw) {
-    return GRF::maxRegs(hw);
+static constexpr int maxRegs(PF pf) {
+    return GRF::maxRegs(pf);
 }
 
 class ARF : public Register
@@ -1386,8 +1410,8 @@ public:
     constexpr ExtendedReg(RegData base_, uint8_t mmeNum_) : base(base_), mmeNum(mmeNum_) {}
     constexpr ExtendedReg(RegData base_, SpecialAccumulatorRegister acc) : base(base_), mmeNum(acc.getMME()) {}
 
-    void fixup(HW hw, int execSize, int execWidth, DataType defaultType, int srcN, int arity) {
-        base.fixup(hw, execSize, execWidth, defaultType, srcN, arity);
+    void fixup(PF pf, int execSize, int execWidth, DataType defaultType, int srcN, int arity) {
+        base.fixup(pf, execSize, execWidth, defaultType, srcN, arity);
     }
 
     constexpr int getMods()         const { return base.getMods(); }
@@ -1749,7 +1773,7 @@ public:
 
     inline Subregister sub(HW hw, int offset, DataType type) const;
 
-    void fixup(HW hw, int execSize, int execWidth, DataType defaultType, int srcN, int arity) {}
+    void fixup(PF pf, int execSize, int execWidth, DataType defaultType, int srcN, int arity) {}
     constexpr DataType getType() const { return DataType::invalid; }
 
 #ifdef NGEN_ASM
@@ -2013,7 +2037,7 @@ static inline bool trackedByToken(HW hw, Opcode op, unsigned dstTypecode)
         case Opcode::dpasw:
             return true;
         case Opcode::bdpas:
-            return (hw >= HW::XE3P_35_10);
+            return (hw >= HW::Xe3P);
         default:
             if (isSend(op)) return true;
             if (hw == HW::XeHPG && dstTypecode == 0b1011 /* :df */) return true;
@@ -2557,7 +2581,7 @@ public:
         return Immediate(0, dt);
     }
 
-    void fixup(HW hw, int execSize, int execWidth, DataType defaultType, int srcN, int arity) const {
+    void fixup(PF pf, int execSize, int execWidth, DataType defaultType, int srcN, int arity) const {
 #ifdef NGEN_SAFE
         if (getBytes(type) > (16 >> arity))
             throw invalid_immediate_exception();

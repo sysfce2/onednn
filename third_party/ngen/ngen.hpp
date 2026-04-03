@@ -62,9 +62,7 @@ template <HW hw> struct Instruction12Dispatch       { using type = Instruction12
 template <> struct Instruction12Dispatch<HW::XeHPC> { using type = InstructionXeHPC; };
 template <> struct Instruction12Dispatch<HW::Xe2>   { using type = InstructionXeHPC; };
 template <> struct Instruction12Dispatch<HW::Xe3>   { using type = InstructionXeHPC; };
-template <> struct Instruction12Dispatch<HW::XE3P_35_10>  { using type = InstructionXe3p;  };
-template <> struct Instruction12Dispatch<HW::XE3P_35_11>  { using type = InstructionXe3p;  };
-template <> struct Instruction12Dispatch<HW::XE3P_UNKNOWN>  { using type = InstructionXe3p;  };
+template <> struct Instruction12Dispatch<HW::Xe3P>  { using type = InstructionXe3p;  };
 
 // MSVC v140 workaround for enum comparison in template arguments.
 static constexpr bool hwLT(HW hw1, HW hw2) { return hw1 < hw2; }
@@ -194,6 +192,7 @@ protected:
 
     static constexpr bool isGen12 = (hw >= HW::Gen12LP);
     Product product;
+    PF pf;
     int declaredGRFs = 128;
 
     InterfaceLabels _interfaceLabels;
@@ -207,7 +206,7 @@ protected:
 
 private:
     InstructionModifier defaultModifier;
-    bool useEfficient64Bit = (hw >= HW::XE3P_35_10);
+    bool useEfficient64Bit = (hw >= HW::Xe3P);
 
     LabelManager labelManager;
     InstructionStream rootStream;
@@ -330,7 +329,7 @@ private:
 
 public:
     explicit BinaryCodeGenerator(Product product_, DebugConfig debugConfig = {})
-        : product{product_}, debugLine(debugConfig), defaultModifier{}, labelManager{},
+        : product{product_}, pf{product_.family}, debugLine(debugConfig), defaultModifier{}, labelManager{},
 
                                                      lfsr{this}, shfl{this},
                                                      sync{this}, load{this}, store{this}, atomic{this}
@@ -763,35 +762,35 @@ public:
     template <typename DT = void>
     void mac(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, SourceLocation loc = {}) {
 #ifdef NGEN_SAFE
-        if (hardware >= HW::XE3P_35_10) unsupported();
+        if (hardware >= HW::Xe3P) unsupported();
 #endif
         opX(Opcode::mac, getDataType<DT>(), mod, dst, src0, src1, loc);
     }
     template <typename DT = void>
     void mac(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1, SourceLocation loc = {}) {
 #ifdef NGEN_SAFE
-        if (hardware >= HW::XE3P_35_10) unsupported();
+        if (hardware >= HW::Xe3P) unsupported();
 #endif
         opX(Opcode::mac, getDataType<DT>(), mod, dst, src0, src1, loc);
     }
     template <typename DT = void>
     void mach(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, SourceLocation loc = {}) {
 #ifdef NGEN_SAFE
-        if (hardware >= HW::XE3P_35_10) unsupported();
+        if (hardware >= HW::Xe3P) unsupported();
 #endif
         opX(Opcode::mach, getDataType<DT>(), (hw >= HW::XeHPC) ? mod : (mod | AccWrEn), dst, src0, src1, loc);
     }
     template <typename DT = void>
     void mach(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1, SourceLocation loc = {}) {
 #ifdef NGEN_SAFE
-        if (hardware >= HW::XE3P_35_10) unsupported();
+        if (hardware >= HW::Xe3P) unsupported();
 #endif
         opX(Opcode::mach, getDataType<DT>(), (hw >= HW::XeHPC) ? mod : (mod | AccWrEn), dst, src0, src1, loc);
     }
     template <typename DT = void>
     void macl(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const RegData &src1, SourceLocation loc = {}) {
 #ifdef NGEN_SAFE
-        if (hardware >= HW::XE3P_35_10) unsupported();
+        if (hardware >= HW::Xe3P) unsupported();
         if (hw < HW::Gen10) unsupported();
 #endif
         opX((hw >= HW::XeHPC) ? Opcode::macl : Opcode::mach, getDataType<DT>(), mod, dst, src0, src1, loc);
@@ -799,7 +798,7 @@ public:
     template <typename DT = void>
     void macl(const InstructionModifier &mod, const RegData &dst, const RegData &src0, const Immediate &src1, SourceLocation loc = {}) {
 #ifdef NGEN_SAFE
-        if (hardware >= HW::XE3P_35_10) unsupported();
+        if (hardware >= HW::Xe3P) unsupported();
         if (hw < HW::Gen10) unsupported();
 #endif
         opX((hw >= HW::XeHPC) ? Opcode::macl : Opcode::mach, getDataType<DT>(), mod, dst, src0, src1, loc);
@@ -2028,7 +2027,7 @@ std::vector<uint8_t> BinaryCodeGenerator<hw>::getCode()
     rootStream.fixLabels(labelManager);
 
     Program program(rootStream);
-    autoswsb::BasicBlockList analysis = autoswsb::autoSWSB(hw, declaredGRFs, program, cancelAutoSWSB_.get());
+    autoswsb::BasicBlockList analysis = autoswsb::autoSWSB(pf, declaredGRFs, program, cancelAutoSWSB_.get());
     std::vector<uint8_t> result;
 
     if (analysis.empty()) {
@@ -2086,8 +2085,8 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
         emod |= NoMask;
 
     int ewidth = getExecWidth({defaultType, dst.getType(), src0.getType()});
-    dst.fixup(hw, emod.getExecSize(), ewidth, defaultType, -1, 1);
-    src0.fixup(hw, emod.getExecSize(), ewidth, defaultType, 0, 1);
+    dst.fixup(pf, emod.getExecSize(), ewidth, defaultType, -1, 1);
+    src0.fixup(pf, emod.getExecSize(), ewidth, defaultType, 0, 1);
 
     encodeCommon8(i, op, emod);
     i.common.accessMode = std::is_base_of<Align16Operand, D>::value;
@@ -2121,8 +2120,8 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
         emod |= NoMask;
 
     int ewidth = getExecWidth({defaultType, dst.getType(), src0.getType()});
-    dst.fixup(hw, emod.getExecSize(), ewidth, defaultType, -1, 1);
-    src0.fixup(hw, emod.getExecSize(), ewidth, defaultType, 0, 1);
+    dst.fixup(pf, emod.getExecSize(), ewidth, defaultType, -1, 1);
+    src0.fixup(pf, emod.getExecSize(), ewidth, defaultType, 0, 1);
 
     encodeCommon12(i, op, emod, dst, tag);
 
@@ -2137,7 +2136,7 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
 
     i.binary.cmod = static_cast<int>(mod.getCMod());
 
-    if (hw >= HW::XE3P_35_10) {
+    if (hw >= HW::Xe3P) {
         if (op == Opcode::math)
             i.binaryXe3pImm.src0Reg8 = 0;
         i.binaryXe3p.dstReg8 = getHighBit(dst);
@@ -2158,8 +2157,8 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
         emod |= NoMask;
 
     int ewidth = getExecWidth({defaultType, dst.getType(), src0.getType()});
-    dst.fixup(hw, emod.getExecSize(), ewidth, defaultType, -1, 1);
-    src0.fixup(hw, emod.getExecSize(), ewidth, defaultType, 0, 1);
+    dst.fixup(pf, emod.getExecSize(), ewidth, defaultType, -1, 1);
+    src0.fixup(pf, emod.getExecSize(), ewidth, defaultType, 0, 1);
 
     encodeCommon8(i, op, emod);
     i.common.accessMode = std::is_base_of<Align16Operand, D>::value;
@@ -2196,8 +2195,8 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
         emod |= NoMask;
 
     int ewidth = getExecWidth({defaultType, dst.getType(), src0.getType()});
-    dst.fixup(hw, emod.getExecSize(), ewidth, defaultType, -1, 1);
-    src0.fixup(hw, emod.getExecSize(), ewidth, defaultType, 0, 1);
+    dst.fixup(pf, emod.getExecSize(), ewidth, defaultType, -1, 1);
+    src0.fixup(pf, emod.getExecSize(), ewidth, defaultType, 0, 1);
 
     encodeCommon12(i, op, emod, dst, tag);
 
@@ -2221,7 +2220,7 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
         i.imm64.high = val >> 32;
     }
 
-    if (hw >= HW::XE3P_35_10)
+    if (hw >= HW::Xe3P)
         i.unaryXe3pImm.dstReg8 = getHighBit(dst);
 
     db(i, loc);
@@ -2239,9 +2238,9 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
         emod |= NoMask;
 
     int ewidth = getExecWidth({defaultType, dst.getType(), src0.getType(), src1.getType()});
-    dst.fixup(hw, emod.getExecSize(),  ewidth, defaultType, -1, 2);
-    src0.fixup(hw, emod.getExecSize(), ewidth, defaultType, 0, 2);
-    src1.fixup(hw, emod.getExecSize(), ewidth, defaultType, 1, 2);
+    dst.fixup(pf, emod.getExecSize(),  ewidth, defaultType, -1, 2);
+    src0.fixup(pf, emod.getExecSize(), ewidth, defaultType, 0, 2);
+    src1.fixup(pf, emod.getExecSize(), ewidth, defaultType, 1, 2);
 
     encodeCommon8(i, op, emod);
     i.common.accessMode = std::is_base_of<Align16Operand, D>::value;
@@ -2284,9 +2283,9 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
         emod |= NoMask;
 
     int ewidth = getExecWidth({defaultType, dst.getType(), src0.getType(), src1.getType()});
-    dst.fixup(hw,  emod.getExecSize(), ewidth, defaultType, -1, 2);
-    src0.fixup(hw, emod.getExecSize(), ewidth, defaultType, 0, 2);
-    src1.fixup(hw, emod.getExecSize(), ewidth, defaultType, 1, 2);
+    dst.fixup(pf,  emod.getExecSize(), ewidth, defaultType, -1, 2);
+    src0.fixup(pf, emod.getExecSize(), ewidth, defaultType, 0, 2);
+    src1.fixup(pf, emod.getExecSize(), ewidth, defaultType, 1, 2);
 
     encodeCommon12(i, op, emod, dst, tag);
 
@@ -2304,7 +2303,7 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
 
     i.binary.cmod = static_cast<int>(mod.getCMod());
 
-    if (hw >= HW::XE3P_35_10) {
+    if (hw >= HW::Xe3P) {
         i.binaryXe3pImm.src0Reg8 = 0;
         i.binaryXe3p.dstReg8 = getHighBit(dst);
         i.binaryXe3p.src0Reg8 = getHighBit(src0);
@@ -2326,9 +2325,9 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
         emod |= NoMask;
 
     int ewidth = getExecWidth({defaultType, dst.getType(), src0.getType(), src1.getType()});
-    dst.fixup(hw,  emod.getExecSize(), ewidth, defaultType, -1, 2);
-    src0.fixup(hw, emod.getExecSize(), ewidth, defaultType, 0, 2);
-    src1.fixup(hw, emod.getExecSize(), ewidth, defaultType, 1, 2);
+    dst.fixup(pf,  emod.getExecSize(), ewidth, defaultType, -1, 2);
+    src0.fixup(pf, emod.getExecSize(), ewidth, defaultType, 0, 2);
+    src1.fixup(pf, emod.getExecSize(), ewidth, defaultType, 1, 2);
 
     encodeCommon8(i, op, emod);
     i.common.accessMode = std::is_base_of<Align16Operand, D>::value;
@@ -2366,9 +2365,9 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
         emod |= NoMask;
 
     int ewidth = getExecWidth({defaultType, dst.getType(), src0.getType(), src1.getType()});
-    dst.fixup(hw,  emod.getExecSize(), ewidth, defaultType, -1, 2);
-    src0.fixup(hw, emod.getExecSize(), ewidth, defaultType, 0, 2);
-    src1.fixup(hw, emod.getExecSize(), ewidth, defaultType, 1, 2);
+    dst.fixup(pf,  emod.getExecSize(), ewidth, defaultType, -1, 2);
+    src0.fixup(pf, emod.getExecSize(), ewidth, defaultType, 0, 2);
+    src1.fixup(pf, emod.getExecSize(), ewidth, defaultType, 1, 2);
 
     encodeCommon12(i, op, emod, dst, tag);
 
@@ -2388,7 +2387,7 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
     i.binary.src1Imm = true;
     i.imm32.value = uint32_t(static_cast<uint64_t>(src1));
 
-    if (hw >= HW::XE3P_35_10) {
+    if (hw >= HW::Xe3P) {
         i.binaryXe3pImm.dstReg8 = getHighBit(dst);
         i.binaryXe3pImm.src0Reg8 = getHighBit(src0);
     }
@@ -2422,10 +2421,10 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
     InstructionModifier emod = mod | defaultModifier | Align16;
 
     int ewidth = getExecWidth({defaultType, dst.getType(), src0.getType(), src1.getType(), src2.getType()});
-    dst.getReg().fixup(hw,  emod.getExecSize(), ewidth, defaultType, -1, 3);
-    src0.getReg().fixup(hw, emod.getExecSize(), ewidth, defaultType, 0, 3);
-    src1.getReg().fixup(hw, emod.getExecSize(), ewidth, defaultType, 1, 3);
-    src2.getReg().fixup(hw, emod.getExecSize(), ewidth, defaultType, 2, 3);
+    dst.getReg().fixup(pf,  emod.getExecSize(), ewidth, defaultType, -1, 3);
+    src0.getReg().fixup(pf, emod.getExecSize(), ewidth, defaultType, 0, 3);
+    src1.getReg().fixup(pf, emod.getExecSize(), ewidth, defaultType, 1, 3);
+    src2.getReg().fixup(pf, emod.getExecSize(), ewidth, defaultType, 2, 3);
 
     encodeCommon8(i, op, emod);
 
@@ -2464,10 +2463,10 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
     InstructionModifier emod = mod | defaultModifier;
 
     int ewidth = getExecWidth({defaultType, dst.getType(), src0.getType(), src1.getType(), src2.getType()});
-    dst.fixup(hw,  emod.getExecSize(), ewidth, defaultType, -1, 3);
-    src0.fixup(hw, emod.getExecSize(), ewidth, defaultType, 0, 3);
-    src1.fixup(hw, emod.getExecSize(), ewidth, defaultType, 1, 3);
-    src2.fixup(hw, emod.getExecSize(), ewidth, defaultType, 2, 3);
+    dst.fixup(pf,  emod.getExecSize(), ewidth, defaultType, -1, 3);
+    src0.fixup(pf, emod.getExecSize(), ewidth, defaultType, 0, 3);
+    src1.fixup(pf, emod.getExecSize(), ewidth, defaultType, 1, 3);
+    src2.fixup(pf, emod.getExecSize(), ewidth, defaultType, 2, 3);
 
     encodeCommon8(i, op, emod);
 
@@ -2492,10 +2491,10 @@ BinaryCodeGenerator<hw>::opX(Opcode op, DataType defaultType, const InstructionM
     InstructionModifier emod = mod | defaultModifier;
 
     int ewidth = getExecWidth({defaultType, dst.getType(), src0.getType(), src1.getType(), src2.getType()});
-    dst.fixup(hw,  emod.getExecSize(), ewidth, defaultType, -1, 3);
-    src0.fixup(hw, emod.getExecSize(), ewidth, defaultType, 0, 3);
-    src1.fixup(hw, emod.getExecSize(), ewidth, defaultType, 1, 3);
-    src2.fixup(hw, emod.getExecSize(), ewidth, defaultType, 2, 3);
+    dst.fixup(pf,  emod.getExecSize(), ewidth, defaultType, -1, 3);
+    src0.fixup(pf, emod.getExecSize(), ewidth, defaultType, 0, 3);
+    src1.fixup(pf, emod.getExecSize(), ewidth, defaultType, 1, 3);
+    src2.fixup(pf, emod.getExecSize(), ewidth, defaultType, 2, 3);
 
     encodeCommon12(i, op, emod, dst, tag);
 
@@ -2543,10 +2542,10 @@ void BinaryCodeGenerator<hw>::opBfn(Opcode op, DataType defaultType, const Instr
     InstructionModifier emod = mod | defaultModifier;
 
     int ewidth = getExecWidth({defaultType, dst.getType(), src0.getType(), src1.getType(), src2.getType()});
-    dst.fixup(hw,  emod.getExecSize(), ewidth, defaultType, -1, 3);
-    src0.fixup(hw, emod.getExecSize(), ewidth, defaultType, 0, 3);
-    src1.fixup(hw, emod.getExecSize(), ewidth, defaultType, 1, 3);
-    src2.fixup(hw, emod.getExecSize(), ewidth, defaultType, 2, 3);
+    dst.fixup(pf,  emod.getExecSize(), ewidth, defaultType, -1, 3);
+    src0.fixup(pf, emod.getExecSize(), ewidth, defaultType, 0, 3);
+    src1.fixup(pf, emod.getExecSize(), ewidth, defaultType, 1, 3);
+    src2.fixup(pf, emod.getExecSize(), ewidth, defaultType, 2, 3);
 
     encodeCommon12(i, op, emod, dst, tag);
 
@@ -2567,14 +2566,15 @@ void BinaryCodeGenerator<hw>::opBfn(Opcode op, DataType defaultType, const Instr
 }
 
 template <HW hw>
-static inline void encodeDPAS(Instruction12 &i, Opcode op, DataType defaultType, const InstructionModifier &emod, int sdepth, int rcount, RegData dst, RegData src0, RegData src1, RegData src2)
+static inline void encodeDPAS(Instruction12 &i, Opcode op, DataType defaultType, const InstructionModifier &emod, int sdepth, int rcount, RegData dst, RegData src0, RegData src1, RegData src2, ProductFamily pf)
+
 {
     typename EncodingTag12Dispatch<hw>::tag tag;
 
-    dst.fixup(hw, emod.getExecSize(), 0, defaultType, -1, 3);
-    src0.fixup(hw, emod.getExecSize(), 0, defaultType, 0, 3);
-    src1.fixup(hw, emod.getExecSize(), 0, defaultType, 1, 3);
-    src2.fixup(hw, emod.getExecSize(), 0, defaultType, 2, 3);
+    dst.fixup(pf, emod.getExecSize(), 0, defaultType, -1, 3);
+    src0.fixup(pf, emod.getExecSize(), 0, defaultType, 0, 3);
+    src1.fixup(pf, emod.getExecSize(), 0, defaultType, 1, 3);
+    src2.fixup(pf, emod.getExecSize(), 0, defaultType, 2, 3);
 
     encodeCommon12(i, op, emod, dst, tag);
 
@@ -2601,7 +2601,7 @@ void BinaryCodeGenerator<hw>::opDpas(Opcode op, DataType defaultType, const Inst
     if (hw < HW::XeHP) unsupported();
 
     Instruction12 i{};
-    encodeDPAS<hw>(i, op, defaultType, mod | defaultModifier, sdepth, rcount, dst, src0, src1, src2);
+    encodeDPAS<hw>(i, op, defaultType, mod | defaultModifier, sdepth, rcount, dst, src0, src1, src2, pf);
     db(i, loc);
 }
 
@@ -2609,15 +2609,15 @@ template <HW hw>
 void BinaryCodeGenerator<hw>::opBdpas(Opcode op, DataType defaultType, const InstructionModifier &mod, int sdepth, int rcount,
                                       RegData dst, RegData src0, RegData src1, RegData src2, RegData src3, RegData src4, SourceLocation loc)
 {
-    if (hw < HW::XE3P_35_10) unsupported();
+    if (hw < HW::Xe3P) unsupported();
     if (sdepth != 8 || rcount != 8) unsupported();
 
     Instruction12 i{};
 
-    encodeDPAS<hw>(i, op, defaultType, mod | defaultModifier, sdepth, rcount, dst, src0, src1, src2);
+    encodeDPAS<hw>(i, op, defaultType, mod | defaultModifier, sdepth, rcount, dst, src0, src1, src2, pf);
 
-    src3.fixup(hw, mod.getExecSize(), 0, DataType::ub, 3, 5);
-    src4.fixup(hw, mod.getExecSize(), 0, DataType::ub, 4, 5);
+    src3.fixup(pf, mod.getExecSize(), 0, DataType::ub, 3, 5);
+    src4.fixup(pf, mod.getExecSize(), 0, DataType::ub, 4, 5);
 
     int s3r = src3.getBase(), s4r = src4.getBase();
 
@@ -2963,7 +2963,7 @@ BinaryCodeGenerator<hw>::opBranch(Opcode op, const InstructionModifier &mod, con
     i.branches.jip = jip;
     i.branches.uip = uip;
 
-    if (hw >= HW::XE3P_35_10)
+    if (hw >= HW::Xe3P)
         i.branchXe3p.dstReg8 = getHighBit(dst);
 
     db(i, loc);
@@ -3011,7 +3011,7 @@ BinaryCodeGenerator<hw>::opBranch(Opcode op, const InstructionModifier &mod, con
     i.binary.src0Imm = true;
     i.branches.jip = jip;
 
-    if (hw >= HW::XE3P_35_10)
+    if (hw >= HW::Xe3P)
         i.branchXe3p.dstReg8 = getHighBit(dst);
 
     db(i, loc);
@@ -3061,7 +3061,7 @@ BinaryCodeGenerator<hw>::opBranch(Opcode op, const InstructionModifier &mod, con
         i.binary.src0 &= 0xFFFF;
 
 
-    if (hw >= HW::XE3P_35_10) {
+    if (hw >= HW::Xe3P) {
         i.branchXe3p.dstReg8 = getHighBit(dst);
         i.branchXe3p.src0Reg8 = getHighBit(src0);
     }
@@ -3105,7 +3105,7 @@ BinaryCodeGenerator<hw>::opJmpi(Opcode op, const InstructionModifier &mod, const
 
     encodeCommon8(i, op, emod);
 
-    src0.fixup(hw, emod.getExecSize(), 0, DataType::d, 0, 2);
+    src0.fixup(pf, emod.getExecSize(), 0, DataType::d, 0, 2);
 
     i.binary.dst = encodeBinaryOperand8<true>(dst).bits;
     i.binary.src0 = encodeBinaryOperand8<false>(src0).bits;
