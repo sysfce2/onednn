@@ -1373,19 +1373,50 @@ void jit_brgemm_kernel_t<Wmm>::store_accumulators_apply_post_ops(dim_t bd_block,
 
     if (brg.with_src_scales) {
         reg_src_scales.restoreTo(reg_aux_src_scales);
-        auto vmm_src_scales = vmm_tmp(0);
-        if (!has_ptr_b_support)
-            vbroadcastss(vmm_src_scales, ptr[reg_aux_src_scales]);
+        if (brg.is_per_k_src_scales) {
+            // Per-M src scales: each bd has its own scalar at byte stride
+            // `src_scale_m_stride`. Used by int8 grouped quantization where
+            // the matmul driver shifts the pointer to the current K-group.
+            for (dim_t bd = 0; bd < bd_block; bd++) {
+                auto vmm_src_sc = vmm_tmp(0);
+                const auto src_sc_addr
+                        = ptr[reg_aux_src_scales + bd * brg.src_scale_m_stride];
+                switch (brg.dt_src_scales) {
+                    case data_type::f32:
+                        uni_vbroadcastss(vmm_src_sc, src_sc_addr);
+                        break;
+                    case data_type::bf16:
+                        vpbroadcastw(vmm_src_sc, src_sc_addr);
+                        uni_vpslld(vmm_src_sc, vmm_src_sc, 16);
+                        break;
+                    case data_type::f16:
+                        vpbroadcastw(vmm_src_sc, src_sc_addr);
+                        vcvtph2ps(vmm_src_sc, Xbyak::Xmm(vmm_src_sc.getIdx()));
+                        break;
+                    default: assert(!"unsupported src_scales data type");
+                }
+                for (dim_t ld = 0; ld < ld_block2; ld++) {
+                    auto vmm = accm(ld_block2, bd, ld);
+                    if (dq2ps_required && !dq2ps_cvt_done)
+                        uni_vcvtdq2ps(vmm, vmm);
+                    uni_vmulps(vmm, vmm, vmm_src_sc);
+                }
+            }
+        } else {
+            auto vmm_src_scales = vmm_tmp(0);
+            if (!has_ptr_b_support)
+                vbroadcastss(vmm_src_scales, ptr[reg_aux_src_scales]);
 
-        for_(dim_t ld = 0; ld < ld_block2; ld++)
-        for (dim_t bd = 0; bd < bd_block; bd++) {
-            auto vmm = accm(ld_block2, bd, ld);
-            if (dq2ps_required && !dq2ps_cvt_done) uni_vcvtdq2ps(vmm, vmm);
+            for_(dim_t ld = 0; ld < ld_block2; ld++)
+            for (dim_t bd = 0; bd < bd_block; bd++) {
+                auto vmm = accm(ld_block2, bd, ld);
+                if (dq2ps_required && !dq2ps_cvt_done) uni_vcvtdq2ps(vmm, vmm);
 
-            if (has_ptr_b_support) {
-                vmulps(vmm, vmm, ptr_b[reg_aux_src_scales]);
-            } else {
-                vmulps(vmm, vmm, vmm_src_scales);
+                if (has_ptr_b_support) {
+                    vmulps(vmm, vmm, ptr_b[reg_aux_src_scales]);
+                } else {
+                    vmulps(vmm, vmm, vmm_src_scales);
+                }
             }
         }
         dq2ps_cvt_done = true;
@@ -2918,6 +2949,15 @@ void jit_brgemm_kernel_t<Wmm>::bdb_loop() {
             add(reg_D, bdb_D_offset(bd_block2));
         }
         add(reg_a_offset, bdb_A_offset(bd_block2));
+
+        if (brg.is_per_k_src_scales) {
+            const auto adj_bd_block = is_bdb_tail ? brg.bdb_tail : brg.bd_block;
+            const auto src_scales_stack_ptr
+                    = reg_src_scales.getStoragePtr().getRegExp();
+            const auto src_scales_offset
+                    = adj_bd_block * bd_block2 * brg.src_scale_m_stride;
+            add(dword[src_scales_stack_ptr], src_scales_offset);
+        }
 
         if (brg.is_gemv && brg.treat_y_as_row) {
             if (brg.with_bias) {
