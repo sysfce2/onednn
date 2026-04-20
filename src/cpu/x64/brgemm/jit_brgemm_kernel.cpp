@@ -187,8 +187,11 @@ private:
     const reg64_t reg_A = r13;
     const reg64_t reg_B = r12;
 
-    const reg64_t reg_aux_A = r11;
-    const reg64_t reg_aux_B = r10;
+    // r10, r11 are used in dot product with scales application and should be properly
+    // saved and restored
+    const reg64_savable_t reg_aux_A {regscratchpad_, r11};
+    const reg64_savable_t reg_aux_B {regscratchpad_, r10};
+
     const reg64_t reg_aux_A_vpad = r11;
 
     const reg64_savable_t reg_bdb_loop {regscratchpad_, r9, r16};
@@ -200,11 +203,13 @@ private:
     const reg64_t reg_s8_input_shift = r9;
     const reg64_t reg_zp_a_input_shift = r9;
 
-    const reg64_t reg_BS_loop = rax;
-    const reg64_t reg_rdb_loop = rbx;
-    const reg64_t reg_BS = abi_not_param1;
+    // rax is used for div instruction in microkernel, so it should be savable
+    const reg64_savable_t reg_BS_loop {regscratchpad_, rax};
 
-    const reg64_t reg_a_offset = rdx;
+    const reg64_savable_t reg_rdb_loop {regscratchpad_, rbx};
+    const reg64_t reg_BS = abi_not_param1; // rcx (rdi for win os)
+
+    const reg64_savable_t reg_a_offset {regscratchpad_, rdx};
     const reg64_t reg_b_offset = rsi;
 
     const reg64_savable_t reg_aux1_A {regscratchpad_, rbx, rbp, may_use_rbp()};
@@ -229,6 +234,7 @@ private:
     const reg64_savable_t reg_aux_src_scales {regscratchpad_, r10};
     const reg64_savable_t reg_aux_wei_scales {regscratchpad_, r10};
     const reg64_savable_t reg_aux_scale_adjust {regscratchpad_, r10};
+
     const reg64_savable_t reg_do_post_ops {regscratchpad_, rbx};
     const reg64_savable_t reg_do_comp {regscratchpad_, rbx};
     const reg64_savable_t reg_skip_accm {regscratchpad_, rbx};
@@ -424,6 +430,8 @@ private:
             matrix_kind_t mk);
     void maybe_tileloadd_nt(matrix_kind_t matrix_kind, dim_t idx, dim_t offset,
             bool is_rd_tail, bool is_tail, bool last_bdb);
+    void load_scales_to_vmm(const data_type_t type_in, const Vmm &scales,
+            const Xbyak::Operand &op, bool is_ld_tail, bool is_single_scale);
     void dot_product(Vmm v1, Vmm v2, Vmm v3);
     void gemm_microkernel(dim_t bd_block2, bool is_bdb_tail, dim_t ld_block,
             bool is_rd_tail, bool is_ld_tail, dim_t vpad,
@@ -611,7 +619,7 @@ template <typename Wmm>
 dim_t jit_brgemm_kernel_t<Wmm>::wei_scales_offset(
         dim_t ld, bool is_tail) const noexcept {
     const dim_t ld_offset = is_tail ? brg.ldb_tail : ld * brg.ld_block;
-    return ld_offset * brg.is_oc_scale
+    return ld_offset * brg.is_per_n_wei_scales
             * types::data_type_size(brg.dt_wei_scales);
 }
 
@@ -917,6 +925,7 @@ void jit_brgemm_kernel_t<Wmm>::read_params() {
 
     mov(reg_C, ptr[param1 + GET_OFF(ptr_C)]);
     mov(reg_D, ptr[param1 + GET_OFF(ptr_D)]);
+    reg_D.save();
     mov(reg_BS, ptr[param1 + GET_OFF(BS)]);
 
     // ptr_buf is re-used for passing compensations for
@@ -1088,7 +1097,9 @@ template <typename Wmm>
 void jit_brgemm_kernel_t<Wmm>::apply_alpha_beta(
         dim_t bd_block, dim_t ld_block2, bool is_ld_tail) {
     const bool apply_alpha = brg.alpha != 1.f;
-    const bool dq2ps_required = brg.is_int8 && (apply_alpha || brg.beta != 1.f);
+    const bool is_integer_acc = brg.is_int8;
+    const bool dq2ps_required
+            = is_integer_acc && (apply_alpha || brg.beta != 1.f);
 
     auto vmm_alpha = vmm_tmp(0);
     if (apply_alpha) {
@@ -1129,13 +1140,13 @@ void jit_brgemm_kernel_t<Wmm>::apply_alpha_beta(
             else if (IMPLICATION(
                              is_tail, is_superset(brg.isa_impl, avx512_core))) {
                 auto vmm_masked = vmm_mask(vmm, is_tail, false, k_mask);
-                if (brg.is_int8)
+                if (is_integer_acc)
                     uni_vpaddd(vmm_masked, vmm, ptr_C);
                 else
                     uni_vaddps(vmm_masked, vmm, ptr_C);
             } else {
                 vmaskmovps(vmm_prev_dst, vmm_tail_mask(), ptr_C);
-                if (brg.is_int8)
+                if (is_integer_acc)
                     uni_vpaddd(vmm, vmm, vmm_prev_dst);
                 else
                     uni_vaddps(vmm, vmm, vmm_prev_dst);
@@ -1285,6 +1296,61 @@ void jit_brgemm_kernel_t<Wmm>::reduce_gemv_accumulators(
     }
 }
 
+/** Loads scales to a given vmm, applying masking if needed.
+* Used in multiple places for loading scales for variety of supported data types.
+* @param type_in data type of the scales to be loaded.
+* @param vmm_scales vmm register to load the scales to.
+* @param op an operand to load the scales from, must point to memory.
+* @param is_ld_tail tail flag used for applying tail mask
+* @param is_single_scale single scale flag, broadcasting if it's true.
+*/
+template <typename Wmm>
+void jit_brgemm_kernel_t<Wmm>::load_scales_to_vmm(const data_type_t type_in,
+        const Vmm &vmm_scales, const Xbyak::Operand &op, bool is_ld_tail,
+        bool is_single_scale) {
+    const auto k_mask = is_ld_tail ? ld_tail_mask : ld_full_mask;
+    if (is_single_scale) {
+        switch (type_in) {
+            case data_type::f32: vbroadcastss(vmm_scales, op); break;
+            case data_type::bf16:
+                vpbroadcastw(vmm_scales, op);
+                uni_vpslld(vmm_scales, vmm_scales, 16);
+                break;
+            case data_type::f16:
+                vpbroadcastw(vmm_scales, op);
+                vcvtph2ps(Xmm(vmm_scales.getIdx()), Xmm(vmm_scales.getIdx()));
+                vbroadcastss(vmm_scales, Xmm(vmm_scales.getIdx()));
+                break;
+            default: assert(!"unsupported scales data type");
+        }
+    } else {
+        if (IMPLICATION(is_ld_tail, isa_has_masks(brg.isa_impl))) {
+            const Vmm vmm_scales_masked
+                    = vmm_mask(vmm_scales, is_ld_tail, false, k_mask);
+            const auto addr = op.getAddress();
+            switch (type_in) {
+                case data_type::f32:
+                    if (brg.is_gemv) {
+                        if (!brg.treat_y_as_row)
+                            uni_vmovss(vmm_scales_masked, addr);
+                    } else {
+                        uni_vmovups(vmm_scales_masked, addr);
+                    }
+                    break;
+                case data_type::bf16:
+                    uni_vpmovzxwd(vmm_scales_masked, addr);
+                    uni_vpslld(vmm_scales, vmm_scales, 16);
+                    break;
+                case data_type::f16: vcvtph2ps(vmm_scales_masked, addr); break;
+                default: assert(!"unsupported scales data type");
+            }
+        } else {
+            assert(type_in == data_type::f32);
+            vmaskmovps(vmm_scales, vmm_tail_mask(), op.getAddress());
+        }
+    }
+}
+
 template <typename Wmm>
 void jit_brgemm_kernel_t<Wmm>::store_accumulators_apply_post_ops(dim_t bd_block,
         dim_t ld_block2, dim_t ldb_and_bdb_offset, bool is_ld_tail) {
@@ -1330,54 +1396,11 @@ void jit_brgemm_kernel_t<Wmm>::store_accumulators_apply_post_ops(dim_t bd_block,
         for (dim_t ld = 0; ld < ld_block2; ld++) {
             const auto addr = ptr[reg_aux_wei_scales + wei_scales_offset(ld)];
             const bool is_tail = is_ld_tail && ld + 1 == ld_block2;
-            const bool is_single_scale = !brg.is_oc_scale;
+            const bool is_single_scale = brg.is_single_wei_scale;
 
             const Vmm vmm_wei_scales = vmm_tmp(0);
-            const Vmm vmm_wei_scales_masked
-                    = vmm_mask(vmm_wei_scales, is_tail, false, k_mask);
-            if (is_single_scale) {
-                switch (brg.dt_wei_scales) {
-                    case data_type::f32:
-                        vbroadcastss(vmm_wei_scales, addr);
-                        break;
-                    case data_type::bf16:
-                        vpbroadcastw(vmm_wei_scales, addr);
-                        uni_vpslld(vmm_wei_scales, vmm_wei_scales, 16);
-                        break;
-                    case data_type::f16:
-                        vpbroadcastw(vmm_wei_scales, addr);
-                        vcvtph2ps(Xmm(vmm_wei_scales.getIdx()),
-                                Xmm(vmm_wei_scales.getIdx()));
-                        vbroadcastss(
-                                vmm_wei_scales, Xmm(vmm_wei_scales.getIdx()));
-                        break;
-                    default: assert(!"unsupported wei_scales data type");
-                }
-            } else {
-                if (IMPLICATION(is_tail, isa_has_masks(brg.isa_impl))) {
-                    switch (brg.dt_wei_scales) {
-                        case data_type::f32:
-                            if (brg.is_gemv) {
-                                if (!brg.treat_y_as_row)
-                                    uni_vmovss(vmm_wei_scales_masked, addr);
-                            } else {
-                                uni_vmovups(vmm_wei_scales_masked, addr);
-                            }
-                            break;
-                        case data_type::bf16:
-                            uni_vpmovzxwd(vmm_wei_scales_masked, addr);
-                            uni_vpslld(vmm_wei_scales, vmm_wei_scales, 16);
-                            break;
-                        case data_type::f16:
-                            vcvtph2ps(vmm_wei_scales_masked, addr);
-                            break;
-                        default: assert(!"unsupported wei_scales data type");
-                    }
-                } else {
-                    assert(brg.dt_wei_scales == data_type::f32);
-                    vmaskmovps(vmm_wei_scales, vmm_tail_mask(), addr);
-                }
-            }
+            load_scales_to_vmm(brg.dt_wei_scales, vmm_wei_scales, addr, is_tail,
+                    is_single_scale);
 
             for (dim_t bd = 0; bd < bd_block; bd++) {
                 auto vmm = accm(ld_block2, bd, ld);
@@ -1390,7 +1413,7 @@ void jit_brgemm_kernel_t<Wmm>::store_accumulators_apply_post_ops(dim_t bd_block,
                     } else {
                         auto addr = ptr[reg_aux_wei_scales
                                 + wei_scales_offset(bd)];
-                        uni_vmovss(Xmm(vmm_wei_scales_masked.getIdx()), addr);
+                        uni_vmovss(Xmm(vmm_wei_scales.getIdx()), addr);
                         uni_vmulss(Xmm(vmm.getIdx()), Xmm(vmm.getIdx()),
                                 vmm_wei_scales);
                     }
@@ -2092,7 +2115,7 @@ void jit_brgemm_kernel_t<Wmm>::maybe_tileloadd_nt(matrix_kind_t matrix_kind,
                                : brg.get_B_tensor(idx, is_tail);
     auto t1 = Tmm(tmm_idx);
 
-    auto reg_base = is_A ? reg_aux_A : reg_aux_B;
+    auto &reg_base = is_A ? reg_aux_A : reg_aux_B;
 
     auto reg_stride = is_A ? reg_stride_lda : reg_stride_ldb;
     bool try_load_nt = brg.innermost_loop
@@ -2413,6 +2436,7 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel(dim_t bd_block2,
         dim_t vpad, dim_t rows_for_rd_tail) {
 
     MAYBE_UNUSED(bd_block2);
+
     dim_t bd_block = (is_bdb_tail) ? brg.bdb_tail : brg.bd_block;
     const auto bd_b = nstl::max(dim_t(0), vpad);
     const auto bd_e = nstl::min(bd_block, bd_block + vpad);
@@ -2485,8 +2509,9 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel(dim_t bd_block2,
             }
         }
 
-        if (brg.req_s8s8_compensation)
+        if (brg.req_s8s8_compensation) {
             uni_vpaddb(vmm_bcast, vmm_bcast, vmm_inp_shift());
+        }
     };
 
     auto load_B = [this, is_ld_tail](dim_t vmm_load_idx, dim_t rd, dim_t ld) {
@@ -2685,7 +2710,6 @@ void jit_brgemm_kernel_t<Wmm>::bs_loop(dim_t bd_block2, bool is_bdb_tail,
 
                     add(reg_aux_A, rdb_A_offset());
                     add(reg_aux_B, rdb_B_offset());
-
                     dec(reg_rdb_loop);
                     cmp(reg_rdb_loop, 0);
                     jg(rdb_loop_label, T_NEAR);
@@ -2718,7 +2742,7 @@ void jit_brgemm_kernel_t<Wmm>::bs_loop(dim_t bd_block2, bool is_bdb_tail,
             mov(reg_stride_ldb, brg.rd_step * brg.typesize_B * brg.LDB);
         }
 
-        if (brg.brgattr.max_bs > 1) mov(reg_BS_loop, reg_BS);
+        if (brg.brgattr.max_bs > 1) { mov(reg_BS_loop, reg_BS); }
         L_aligned(BS_loop_label, 64);
         {
             if (first_bdb || last_bdb) {
