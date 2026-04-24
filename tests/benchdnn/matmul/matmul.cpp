@@ -684,7 +684,9 @@ void skip_unimplemented_prb(
         bool is_grouped = (src_encoding == dnnl_grouped
                 || dst_encoding == dnnl_grouped);
 
-        if (is_grouped && (prb->wtag == "abc" || prb->wtag == "acb")) {
+        if (is_grouped
+                && (prb->wtag == "abx" || prb->wtag == "abc"
+                        || prb->wtag == "acb")) {
             // Allow 3D tags for grouped encoding
         } else
 #endif
