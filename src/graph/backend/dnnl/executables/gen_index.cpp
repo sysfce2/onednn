@@ -80,7 +80,7 @@ void genindex_executable_t::execute_impl(const stream &stream,
                 input_dims, i, output_dims_, ndims_);
         auto offset
                 = utils::offset_compute(output_strides_, input_dims, ndims_);
-        output_ptr[offset] = input_dims[axis_];
+        output_ptr[offset] = static_cast<int32_t>(input_dims[axis_]);
     });
     stream.get()->after_exec_hook();
 }
