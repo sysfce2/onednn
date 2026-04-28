@@ -4354,12 +4354,13 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
     /// @param mask Scaling factors correspondence mask that defines the
     ///     correspondence between the tensor dimensions and the @p scales array.
     ///     The set i-th bit indicates that a dedicated scaling factor is used for
-    ///     each index along that dimension. Set the mask to 0 to use a common
+    ///     each index along that dimension. Set the mask to `0` to use a common
     ///     scaling factor for the whole tensor.
-    /// @param groups Scaling factors correspondence groups that define the
-    ///     correspondence between the tensor dimensions and the scales array.
-    ///     The group dimensions should only be provided for each logical dimension
-    ///     that has correspondence mask @p mask set.
+    /// @param groups Block sizes for the last two tensor dimensions: `{G0, G1}`
+    ///     where `G0` subdivides the dimension at position `ndims - 2` and `G1`
+    ///     subdivides the dimension at position `ndims - 1`.
+    ///     `1` is used if a dimension doesn't need sub-blocking.
+    ///     `{}` indicates no grouping.
     /// @param data_type Scaling factors data_type.
     /// @param is_on_host Indicates whether the scaling factor is a host-side scalar.
     /// @param qmode Quantization mode, can be #quantization_mode::static_sazp
