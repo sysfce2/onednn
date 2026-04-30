@@ -75,6 +75,121 @@ status_t stream_profiler_t::get_info(profiling_data_kind_t data_kind,
     return xpu::stream_profiler_t::get_info_impl(stamp2entry, data_kind, data);
 }
 
+status_t stream_profiler_t::stop_async_event_polling() {
+    if (!polling_active_.exchange(false)) {
+        return status::success; // Already stopped
+    }
+
+    if (polling_thread_.joinable()) { polling_thread_.join(); }
+
+    // Process any remaining pending events synchronously
+    std::lock_guard<std::recursive_mutex> lock(m_);
+    for (auto &event_info : pending_events_) {
+        if (!event_info.out_evt) continue;
+
+        // Convert xpu::event_t to cl_event for OpenCL wait
+        const auto &ocl_event = xpu::ocl::event_t::from(*event_info.out_evt);
+        if (ocl_event.size() > 0) {
+            cl_event cl_ev = ocl_event[0].get();
+            cl_int err = clWaitForEvents(1, &cl_ev);
+            if (err == CL_SUCCESS) {
+                double duration_ms = 0.0;
+                get_aggregate_exec_timing(duration_ms, event_info.evt_snapshot);
+                VPROF(event_info.start_ms, primitive, exec, VERBOSE_profile,
+                        event_info.pd_info.c_str(), duration_ms);
+            }
+        }
+
+        end_async_callback_tracking();
+    }
+
+    pending_events_.clear();
+    return status::success;
+}
+
+status_t stream_profiler_t::get_aggregate_exec_timing(double &duration_ms,
+        const std::vector<std::shared_ptr<xpu::event_t>> &evt_snap) const {
+
+    duration_ms = 0.0;
+    if (evt_snap.empty()) return status::success;
+
+    cl_ulong agg_start = UINT64_MAX;
+    cl_ulong agg_end = 0;
+
+    for (const auto &ev : evt_snap) {
+        if (!ev) continue;
+
+        // Convert xpu::event_t to cl_event for OpenCL operations
+        const auto &ocl_event = xpu::ocl::event_t::from(*ev);
+        if (ocl_event.size() > 0) {
+            cl_event cl_ev = ocl_event[0].get();
+
+            cl_ulong evbeg, evend;
+            OCL_CHECK(clGetEventProfilingInfo(cl_ev, CL_PROFILING_COMMAND_START,
+                    sizeof(evbeg), &evbeg, nullptr));
+            OCL_CHECK(clGetEventProfilingInfo(cl_ev, CL_PROFILING_COMMAND_END,
+                    sizeof(evend), &evend, nullptr));
+            agg_start = std::min(agg_start, evbeg);
+            agg_end = std::max(agg_end, evend);
+        }
+    }
+
+    if (agg_start != UINT64_MAX && agg_end > agg_start) {
+        duration_ms = static_cast<double>(agg_end - agg_start) * 1e-6;
+    }
+
+    return status::success;
+}
+
+void stream_profiler_t::log_completed_primitive_events() {
+    std::lock_guard<std::recursive_mutex> lock(m_);
+
+    auto it = pending_events_.begin();
+    while (it != pending_events_.end()) {
+        if (!it->out_evt) {
+            end_async_callback_tracking();
+            it = pending_events_.erase(it);
+            continue;
+        }
+
+        const auto &ocl_event = xpu::ocl::event_t::from(*it->out_evt);
+        if (ocl_event.size() == 0) {
+            end_async_callback_tracking();
+            it = pending_events_.erase(it);
+            continue;
+        }
+
+        cl_event cl_ev = ocl_event[0].get();
+        cl_int event_status;
+        cl_int err = clGetEventInfo(cl_ev, CL_EVENT_COMMAND_EXECUTION_STATUS,
+                sizeof(event_status), &event_status, nullptr);
+
+        if (err == CL_SUCCESS && event_status == CL_COMPLETE) {
+            // Event completed - compute timing using stored event snapshot
+            double duration_ms = 0.0;
+            get_aggregate_exec_timing(duration_ms, it->evt_snapshot);
+            VPROF(it->start_ms, primitive, exec, VERBOSE_profile,
+                    it->pd_info.c_str(), duration_ms);
+
+            end_async_callback_tracking();
+            it = pending_events_.erase(it);
+
+        } else if (err != CL_SUCCESS) {
+            // gracefully exits upon profiler error
+            VWARN(primitive, exec,
+                    "%s, profiler error: failed to query event status",
+                    it->pd_info.c_str());
+            VPROF(it->start_ms, primitive, exec, VERBOSE_profile,
+                    it->pd_info.c_str(), 0.f);
+
+            end_async_callback_tracking();
+            it = pending_events_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 } // namespace ocl
 } // namespace xpu
 } // namespace impl

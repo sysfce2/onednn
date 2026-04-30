@@ -32,6 +32,14 @@ struct stream_profiler_t : public xpu::stream_profiler_t {
 
     status_t get_info(profiling_data_kind_t data_kind, int *num_entries,
             uint64_t *data) const override;
+
+    status_t stop_async_event_polling() override;
+
+    status_t get_aggregate_exec_timing(double &duration_ms,
+            const std::vector<std::shared_ptr<xpu::event_t>> &evt_snap)
+            const override;
+
+    void log_completed_primitive_events() override;
 };
 
 } // namespace ocl
