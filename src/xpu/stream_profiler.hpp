@@ -17,11 +17,16 @@
 #ifndef XPU_STREAM_PROFILER_HPP
 #define XPU_STREAM_PROFILER_HPP
 
+#include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <limits>
 #include <map>
 #include <mutex>
+#include <string>
+#include <thread>
 #include <vector>
+#include <condition_variable>
 
 #include "common/c_types_map.hpp"
 
@@ -91,6 +96,33 @@ struct stream_profiler_t {
         return status::success;
     }
 
+    // The following methods are defined to support asynchronous verbose
+    // profiling during primitive execution - the profiling info is tracked and
+    // logged using event polling
+    status_t start_async_event_polling();
+
+    virtual status_t stop_async_event_polling() = 0;
+    void wait_for_async_event_completion();
+
+    std::vector<std::shared_ptr<xpu::event_t>>
+    extract_current_primitive_events();
+    status_t add_to_pending_async_event_list(
+            std::shared_ptr<xpu::event_t> out_evt, double start_ms,
+            const std::string &pd_info);
+
+    virtual status_t get_aggregate_exec_timing(double &duration_ms,
+            const std::vector<std::shared_ptr<xpu::event_t>> &evt_snap) const
+            = 0;
+    virtual void log_completed_primitive_events() = 0;
+
+    // supports callback waiting logic for stream destruction
+    void start_async_callback_tracking() { async_tracking_count_.fetch_add(1); }
+    void end_async_callback_tracking() {
+        if (async_tracking_count_.fetch_sub(1) == 1) {
+            async_completion_cv_.notify_all();
+        }
+    }
+
 protected:
     status_t get_info_impl(const std::map<uint64_t, entry_t> &stamp2entry,
             profiling_data_kind_t data_kind, uint64_t *data) const {
@@ -118,6 +150,24 @@ protected:
     uint64_t stamp_;
     const stream_t *stream_;
     void (*callback_)(uint64_t, uint64_t) = nullptr;
+
+    // The following attributes are defined to support asynchronous verbose
+    // profiling during primitive execution - the profiling info is tracked and
+    // logged using event polling
+    struct pending_async_event_t {
+        std::shared_ptr<xpu::event_t> out_evt;
+        double start_ms;
+        std::string pd_info;
+        std::vector<std::shared_ptr<xpu::event_t>> evt_snapshot;
+    };
+
+    std::thread polling_thread_;
+    std::atomic<bool> polling_active_ {false};
+    std::vector<pending_async_event_t> pending_events_;
+    std::atomic<int> async_tracking_count_ {0};
+    std::condition_variable_any async_completion_cv_;
+
+    void polling_worker();
 };
 
 } // namespace xpu
