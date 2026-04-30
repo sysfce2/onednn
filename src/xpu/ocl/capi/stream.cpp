@@ -61,6 +61,10 @@ status_t dnnl_ocl_interop_stream_create(
 
     CHECK((*stream)->init_verbose_profiler(enable_verbose_profiler));
 
+    if ((*stream)->is_verbose_profiler_enabled()) {
+        (*stream)->start_verbose_profiler();
+    }
+
     return status::success;
 }
 

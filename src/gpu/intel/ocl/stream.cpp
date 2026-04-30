@@ -120,6 +120,55 @@ void stream_t::after_exec_hook() {
     if (is_profiling_enabled()) profiler_->stop_profiling();
 }
 
+status_t stream_t::start_verbose_profiler() {
+    if (!is_verbose_profiler_enabled()) return status::success;
+    if (!profiler_) return status::invalid_arguments;
+
+    auto *ocl_profiler
+            = utils::downcast<xpu::ocl::stream_profiler_t *>(profiler_.get());
+    if (!ocl_profiler) return status::invalid_arguments;
+
+    // Initialize polling for async profiling
+    return ocl_profiler->start_async_event_polling();
+}
+
+status_t stream_t::run_verbose_profiler(
+        std::string &pd_info, double start_ms) const {
+
+    // utilize the verbose profiler only for profile_exec verbose levels.
+    if (!is_verbose_profiler_enabled()) return status::invalid_arguments;
+
+    // failsafe for primitive executions without any enqueued kernels
+    auto &deps = xpu::ocl::event_t::from(ctx().get_deps());
+    if (deps.size() < 1) {
+        double duration_ms = get_msec() - start_ms;
+        VPROF(start_ms, primitive, exec, VERBOSE_profile, pd_info.c_str(),
+                duration_ms);
+        return status::success;
+    }
+
+    // captured output event acts as the anchor to track primitive execution
+    auto event_copy = deps[0];
+    auto out_evt = std::make_shared<xpu::ocl::event_t>(std::move(event_copy));
+
+    if (!profiler_->stamp()) {
+        VWARN(primitive, exec,
+                "%s, profiler error: failed to record events in context",
+                pd_info.c_str());
+        VPROF(start_ms, primitive, exec, VERBOSE_profile, pd_info.c_str(), 0.f);
+        return status::success;
+    }
+
+    auto *ocl_profiler
+            = utils::downcast<xpu::ocl::stream_profiler_t *>(profiler_.get());
+
+    // Add primitive event to async profiling list - snapshot extraction happens inside
+    CHECK(ocl_profiler->add_to_pending_async_event_list(
+            std::move(out_evt), start_ms, pd_info));
+
+    return status::success;
+}
+
 status_t stream_t::copy(const memory_storage_t &src,
         const memory_storage_t &dst, size_t size, const xpu::event_t &deps,
         xpu::event_t &out_dep) {

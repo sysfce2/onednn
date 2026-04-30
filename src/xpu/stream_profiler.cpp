@@ -62,7 +62,7 @@ xpu::stream_profiler_t::extract_current_primitive_events() {
 }
 
 status_t xpu::stream_profiler_t::add_to_pending_async_event_list(
-        std::shared_ptr<xpu::event_t> out_evt, double start_ms,
+        std::shared_ptr<xpu::event_t> &&out_evt, double start_ms,
         const std::string &pd_info) {
 
     std::lock_guard<std::recursive_mutex> lock(m_);
@@ -72,7 +72,7 @@ status_t xpu::stream_profiler_t::add_to_pending_async_event_list(
             = extract_current_primitive_events();
 
     pending_events_.emplace_back(pending_async_event_t {
-            out_evt, start_ms, pd_info, std::move(evt_snapshot)});
+            std::move(out_evt), start_ms, pd_info, std::move(evt_snapshot)});
 
     start_async_callback_tracking();
     return status::success;

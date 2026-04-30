@@ -76,6 +76,11 @@ struct stream_t : public intel::stream_t {
         return profiler_->get_info(data_kind, num_entries, data);
     }
 
+    status_t start_verbose_profiler() override;
+
+    status_t run_verbose_profiler(
+            std::string &pd_info, double start_ms) const override;
+
     cl_command_queue queue() const { return impl()->queue(); }
 
     const mdapi_helper_t &mdapi_helper() const { return *mdapi_helper_; }
@@ -89,7 +94,18 @@ struct stream_t : public intel::stream_t {
 
     status_t barrier() override;
 
-    ~stream_t() override = default;
+    ~stream_t() override {
+        if (!is_verbose_profiler_enabled()) return;
+        if (!profiler_) return;
+
+        auto *ocl_profiler
+                = utils::downcast<xpu::stream_profiler_t *>(profiler_.get());
+        if (ocl_profiler) {
+            // Stop polling and wait for all async events to complete
+            ocl_profiler->stop_async_event_polling();
+            ocl_profiler->wait_for_async_event_completion();
+        }
+    }
 
     const xpu::ocl::context_t &ocl_ctx() const { return impl()->ocl_ctx(); }
     xpu::ocl::context_t &ocl_ctx() { return impl()->ocl_ctx(); }

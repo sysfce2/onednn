@@ -83,6 +83,12 @@ struct dnnl_stream : public dnnl::impl::c_compatible {
         return dnnl::impl::status::success;
     }
 
+    virtual dnnl::impl::status_t start_verbose_profiler() {
+        if (!is_verbose_profiler_enabled())
+            return dnnl::impl::status::invalid_arguments;
+        return dnnl::impl::status::unimplemented;
+    }
+
     bool is_verbose_profiler_enabled() const { return use_verbose_profiler_; }
 
     virtual dnnl::impl::status_t run_verbose_profiler(

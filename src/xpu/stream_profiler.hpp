@@ -107,7 +107,7 @@ struct stream_profiler_t {
     std::vector<std::shared_ptr<xpu::event_t>>
     extract_current_primitive_events();
     status_t add_to_pending_async_event_list(
-            std::shared_ptr<xpu::event_t> out_evt, double start_ms,
+            std::shared_ptr<xpu::event_t> &&out_evt, double start_ms,
             const std::string &pd_info);
 
     virtual status_t get_aggregate_exec_timing(double &duration_ms,
