@@ -647,10 +647,11 @@ int fill_data(data_kind_t kind, int exec_arg, const prb_t *prb,
     return OK;
 }
 
-void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
+void skip_unimplemented_prb(
+        const prb_t *prb, res_t *res, dnnl_prop_kind_t prop_kind) {
     skip_unimplemented_data_type(
             {prb->src_dt(), prb->wei_dt(), prb->bia_dt, prb->dst_dt()},
-            prb->dir, res);
+            prop_kind, res);
     skip_unimplemented_sum_po(
             prb->attr, res, dnnl_matmul, prb->src_dt(), prb->dst_dt());
     skip_unimplemented_binary_po(prb->attr, res);

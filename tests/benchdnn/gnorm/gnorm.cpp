@@ -509,8 +509,9 @@ dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
     return dnnl_success;
 }
 
-void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
-    skip_unimplemented_data_type({prb->dt[0], prb->dt[1]}, prb->dir, res);
+void skip_unimplemented_prb(
+        const prb_t *prb, res_t *res, dnnl_prop_kind_t prop_kind) {
+    skip_unimplemented_data_type({prb->dt[0], prb->dt[1]}, prop_kind, res);
 
     if ((is_gpu() || is_generic_gpu()) && (prb->dir & FLAG_BWD)) {
         BENCHDNN_PRINT(2,

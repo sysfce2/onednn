@@ -113,8 +113,9 @@ static dnnl_status_t perf_func(
     return dnnl_impl_zero_pad(args[0].memory, stream);
 }
 
-void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
-    skip_unimplemented_data_type({prb->dt}, FWD_D, res);
+void skip_unimplemented_prb(
+        const prb_t *prb, res_t *res, dnnl_prop_kind_t prop_kind) {
+    skip_unimplemented_data_type({prb->dt}, prop_kind, res);
 
     if (is_nvidia_gpu() || is_amd_gpu()) {
         res->state = SKIPPED;
@@ -125,7 +126,7 @@ void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
 int doit(const prb_t *prb, res_t *res) {
     if (bench_mode == bench_mode_t::list) return res->state = LISTED, OK;
 
-    skip_unimplemented_prb(prb, res);
+    skip_unimplemented_prb(prb, res, dnnl_prop_kind_undef);
     if (res->state == SKIPPED) return OK;
 
     auto data_md = dnn_mem_t::init_md(

@@ -777,10 +777,10 @@ dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
     return dnnl_success;
 }
 
-void skip_unimplemented_prb(const prb_t *prb_, res_t *res) {
+void skip_unimplemented_prb(
+        const prb_t *prb_, res_t *res, dnnl_prop_kind_t unused) {
     const prb_t &prb = *prb_;
-    dir_t dir = str2dir(prop2str(prb.prop));
-    skip_unimplemented_data_type({prb.cfg[SRC_LAYER].dt}, dir, res);
+    skip_unimplemented_data_type({prb.cfg[SRC_LAYER].dt}, prb.prop, res);
     skip_unimplemented_sum_po(prb.attr, res, dnnl_rnn, prb.cfg[SRC_LAYER].dt);
     skip_unimplemented_binary_po(prb.attr, res);
     skip_unimplemented_prelu_po(prb.attr, res, dnnl_rnn);
@@ -819,8 +819,10 @@ void skip_unimplemented_prb(const prb_t *prb_, res_t *res) {
         }
 
         // f16 training is not yet fully supported.
+        const bool is_training = prb.prop != dnnl_prop_kind_undef
+                && prb.prop != dnnl_forward_inference;
         const bool is_f16_not_ok
-                = prb.cfg[SRC_LAYER].dt == dnnl_f16 && !(dir & FLAG_INF);
+                = prb.cfg[SRC_LAYER].dt == dnnl_f16 && is_training;
         if (is_f16_not_ok) {
             res->state = SKIPPED;
             res->reason = reason_t::skip_not_supported;

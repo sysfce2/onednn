@@ -115,8 +115,9 @@ int fill_src(int exec_arg, dnnl_data_type_t dt, dnn_mem_t &mem_dt,
     return OK;
 }
 
-void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
-    skip_unimplemented_data_type({prb->sdt, prb->ddt}, prb->dir, res);
+void skip_unimplemented_prb(
+        const prb_t *prb, res_t *res, dnnl_prop_kind_t prop_kind) {
+    skip_unimplemented_data_type({prb->sdt, prb->ddt}, prop_kind, res);
     skip_unimplemented_sum_po(prb->attr, res, dnnl_concat, prb->sdt);
     skip_unimplemented_binary_po(prb->attr, res);
     skip_unimplemented_prelu_po(prb->attr, res, dnnl_concat);

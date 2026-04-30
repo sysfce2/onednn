@@ -205,10 +205,11 @@ dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
     return dnnl_success;
 }
 
-void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
+void skip_unimplemented_prb(
+        const prb_t *prb, res_t *res, dnnl_prop_kind_t prop_kind) {
     const auto sdt = prb->sdt;
     const auto ddt = prb->ddt;
-    skip_unimplemented_data_type({sdt, ddt}, prb->dir, res);
+    skip_unimplemented_data_type({sdt, ddt}, prop_kind, res);
     skip_unimplemented_sum_po(prb->attr, res, dnnl_reorder, sdt);
     skip_unimplemented_binary_po(prb->attr, res);
     skip_unimplemented_prelu_po(prb->attr, res, dnnl_reorder);

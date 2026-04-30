@@ -866,34 +866,35 @@ bool check_md_consistency_with_tag(
     return dnnl_memory_desc_equal(md_new_tag, md);
 }
 
-void skip_unimplemented_data_type(
-        const std::vector<dnnl_data_type_t> &v_dt, dir_t dir, res_t *res) {
+void skip_unimplemented_data_type(const std::vector<dnnl_data_type_t> &v_dt,
+        dnnl_prop_kind_t prop_kind, res_t *res) {
+    const bool is_training = prop_kind != dnnl_prop_kind_undef
+            && prop_kind != dnnl_forward_inference;
     const bool has_f64_support = is_f64_supported();
 #if DNNL_CPU_RUNTIME != DNNL_RUNTIME_NONE
     using namespace dnnl::impl::cpu::platform;
     // bf16 is supported on AVX512-CORE+
     const bool has_bf16_support = is_gpu()
             || (is_cpu() && has_data_type_support(dnnl_bf16)
-                    && IMPLICATION(!(dir & FLAG_INF),
-                            has_training_support(dnnl_bf16)));
+                    && IMPLICATION(
+                            is_training, has_training_support(dnnl_bf16)));
     const bool has_f16_support = is_gpu()
             || (is_cpu() && has_data_type_support(dnnl_f16)
                     && IMPLICATION(
-                            !(dir & FLAG_INF), has_training_support(dnnl_f16)));
+                            is_training, has_training_support(dnnl_f16)));
     const bool has_e8m0_support
             = is_gpu() || (is_cpu() && has_data_type_support(dnnl_e8m0));
     const bool has_f4_e2m1_support
             = is_gpu() || (is_cpu() && has_data_type_support(dnnl_f4_e2m1));
     const bool has_f8_e5m2_support = is_gpu()
             || (is_cpu() && has_data_type_support(dnnl_f8_e5m2)
-                    && (dir & FLAG_INF));
+                    && !is_training);
     const bool has_f8_e4m3_support = is_gpu()
             || (is_cpu() && has_data_type_support(dnnl_f8_e4m3)
-                    && (dir & FLAG_INF));
+                    && !is_training);
 #else
     const bool has_bf16_support = is_gpu();
-    // f16 is supported on GPU for inference only.
-    const bool has_f16_support = is_gpu() && (dir & FLAG_FWD);
+    const bool has_f16_support = is_gpu();
     const bool has_f4_e2m1_support = is_gpu();
     const bool has_e8m0_support = is_gpu();
     const bool has_f8_e5m2_support = is_gpu();

@@ -96,10 +96,11 @@ int fill_src(int exec_arg, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp) {
     return OK;
 }
 
-void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
+void skip_unimplemented_prb(
+        const prb_t *prb, res_t *res, dnnl_prop_kind_t prop_kind) {
     std::vector<dnnl_data_type_t> dts = prb->sdt;
     dts.push_back(prb->ddt);
-    skip_unimplemented_data_type(dts, prb->dir, res);
+    skip_unimplemented_data_type(dts, prop_kind, res);
     skip_unimplemented_sum_po(prb->attr, res, dnnl_sum, prb->sdt[0]);
     skip_unimplemented_binary_po(prb->attr, res);
     skip_unimplemented_prelu_po(prb->attr, res, dnnl_sum);

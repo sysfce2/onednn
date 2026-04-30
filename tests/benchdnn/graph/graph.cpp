@@ -540,25 +540,25 @@ int skip_unimplemented_partitions(const std::vector<partition> &partitions,
                 default: break;
             }
         }
-        // Get partition direction from op's kind which used for skipping
-        // unsupported cases.
-        dir_t dir = FWD_I;
+        // Set prop_kind based on op's kind which used for skipping unsupported
+        // cases.
+        dnnl_prop_kind_t prop_kind = dnnl_forward_inference;
         const auto &op_ids = partitions[i].get_ops();
         for (const auto &aop : dg.ops_) {
             if (std::count(op_ids.begin(), op_ids.end(), aop.id_)) {
                 if (aop.kind_.find("Backward") != std::string::npos) {
-                    dir = BWD_DW;
+                    prop_kind = dnnl_backward;
                     break;
                 }
                 // set the flag back for this specific op.
                 if (aop.kind_ == "BatchNormForwardTraining") {
-                    dir = FLAG_FWD;
+                    prop_kind = dnnl_forward_training;
                     break;
                 }
             }
         }
         if (in_out_dt.empty()) continue;
-        skip_unimplemented_data_type(in_out_dt, dir, res);
+        skip_unimplemented_data_type(in_out_dt, prop_kind, res);
         if (res->state == SKIPPED) return OK;
 
             // TODO: Temporarily skip all f16 graph tests for the RV64 backend.

@@ -273,8 +273,8 @@ inline bool should_stop(const timer::timer_t &t) {
     return stop;
 }
 
-void skip_unimplemented_data_type(
-        const std::vector<dnnl_data_type_t> &v_dt, dir_t dir, res_t *res);
+void skip_unimplemented_data_type(const std::vector<dnnl_data_type_t> &v_dt,
+        dnnl_prop_kind_t prop_kind, res_t *res);
 void skip_unimplemented_sum_po(const attr_t &attr, res_t *res,
         dnnl_primitive_kind_t pkind, dnnl_data_type_t src_dt,
         dnnl_data_type_t dst_dt = dnnl_data_type_undef);
@@ -324,7 +324,8 @@ int check_caches(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &primw,
 //   where `prb_t` was picked up. If the case is unknown, `UNIMPLEMENTED` status
 //   will be returned.
 template <typename prb_t>
-int check_dnnl_status(dnnl_status_t status, const prb_t *prb, res_t *res) {
+int check_dnnl_status(dnnl_status_t status, const prb_t *prb, res_t *res,
+        dnnl_prop_kind_t prop_kind = dnnl_prop_kind_undef) {
     if (!res || status == dnnl_success) return OK;
 
     switch (status) {
@@ -339,7 +340,7 @@ int check_dnnl_status(dnnl_status_t status, const prb_t *prb, res_t *res) {
             }
 
             // Check driver specific cases of unimplemented functionality.
-            skip_unimplemented_prb(prb, res);
+            skip_unimplemented_prb(prb, res, prop_kind);
             if (res->state == SKIPPED || res->state == DEFERRED) return OK;
 
             // If the case is not known to be skipped, it is unimplemented.
@@ -425,8 +426,9 @@ int create_primitive(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &primw,
     init_pd_args_t<prb_t> init_pd_args(
             res, engine, prb, dir, hint, src_md, force_f32_dt);
     status = init_pd_func(init_pd_args);
+    dnnl_prop_kind_t prop_kind = query_prop_kind(init_pd_args.pd);
 
-    SAFE(check_dnnl_status(status, prb, res), WARN);
+    SAFE(check_dnnl_status(status, prb, res, prop_kind), WARN);
     if (res->state == SKIPPED) return OK;
     if (is_graph_ref && res->state == DEFERRED) return OK;
 

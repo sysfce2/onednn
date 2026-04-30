@@ -489,7 +489,8 @@ int init_kernel(kernel_args_t &kernel_args) {
     return OK;
 }
 
-void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
+void skip_unimplemented_prb(
+        const prb_t *prb, res_t *res, dnnl_prop_kind_t prop_kind) {
     auto is_xf16 = [](dnnl_data_type_t dt) {
         return dt == dnnl_bf16 || dt == dnnl_f16;
     };
@@ -501,7 +502,7 @@ void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
     }
     skip_unimplemented_data_type(
             {prb->src_dt(), prb->wei_dt(), prb->bia_dt, prb->dst_dt()},
-            prb->dir, res);
+            prop_kind, res);
     skip_unimplemented_sum_po(
             prb->attr, res, dnnl_gemm, prb->src_dt(), prb->dst_dt());
     skip_unimplemented_binary_po(prb->attr, res);

@@ -376,10 +376,11 @@ int init_prim_ref(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &prim_ref,
     return OK;
 }
 
-void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
+void skip_unimplemented_prb(
+        const prb_t *prb, res_t *res, dnnl_prop_kind_t prop_kind) {
     skip_unimplemented_data_type({prb->get_dt(SRC), prb->get_dt(WEI),
                                          prb->get_dt(BIA), prb->get_dt(DST)},
-            prb->dir, res);
+            prop_kind, res);
     skip_unimplemented_sum_po(prb->attr, res, dnnl_convolution,
             prb->get_dt(SRC), prb->get_dt(DST));
     skip_unimplemented_binary_po(prb->attr, res);
