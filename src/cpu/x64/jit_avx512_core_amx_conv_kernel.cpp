@@ -755,6 +755,14 @@ void jit_avx512_core_amx_copy_to_pbuffer_t::copy_row_reduced_lowering() {
 
     vpxord(zmm_zero, zmm_zero, zmm_zero);
 
+    // On VNNI codepath we are using VPDPBUSD instruction
+    // This requires applying compensation in padded are to
+    // preserve correctness
+    if (jcp.signed_input) {
+        mov(reg_tmp, -128);
+        vpbroadcastb(zmm_zero, reg_tmp.cvt8());
+    }
+
     { // Handle Left Overflow
         Label label_lov, label_lov_skip;
         test(reg_lov, reg_lov);

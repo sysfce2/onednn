@@ -964,6 +964,7 @@ status_t brgemm_convolution_fwd_t<isa>::init(engine_t *engine) {
         ajcp.oc_block = jcp.oc_block;
         ajcp.ic_block = 16;
         ajcp.nb_oc = jcp.nb_oc;
+        ajcp.signed_input = jcp.s8s8_compensation_required;
 
         CHECK(safe_ptr_assign(copy_to_relo_pbuffer_,
                 new jit_avx512_core_amx_copy_to_pbuffer_t(ajcp)));
