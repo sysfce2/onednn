@@ -487,6 +487,36 @@ HANDLE_EXCEPTIONS_FOR_TEST(iface_grouped_test_t, TestMaxGroupMHint) {
     }
 }
 
+HANDLE_EXCEPTIONS_FOR_TEST(iface_grouped_test_t, TestBinaryPostOpPDCreation) {
+    engine eng = get_test_engine();
+
+    const int ngroups = 2;
+    auto src_md = memory::desc::grouped({6, 4}, dt::f32, 0, ngroups);
+    auto wei_md
+            = memory::desc({ngroups, 4, 4}, dt::f32, memory::format_tag::abc);
+    auto dst_md = memory::desc::grouped({6, 4}, dt::f32, 0, ngroups);
+    auto bin_md = memory::desc::grouped({6, 4}, dt::f32, 0, ngroups);
+
+    post_ops po;
+    po.append_binary(algorithm::binary_mul, bin_md);
+    primitive_attr attr;
+    attr.set_post_ops(po);
+
+    ASSERT_NO_THROW(matmul::primitive_desc(eng, src_md, wei_md, dst_md, attr));
+
+    // Mismatched: 3 groups vs 2
+    auto mismatched_bin_md = memory::desc::grouped({6, 4}, dt::f32, 0, 3);
+
+    post_ops mismatched_po;
+    mismatched_po.append_binary(algorithm::binary_mul, mismatched_bin_md);
+    primitive_attr mismatched_attr;
+    mismatched_attr.set_post_ops(mismatched_po);
+
+    EXPECT_THROW(matmul::primitive_desc(
+                         eng, src_md, wei_md, dst_md, mismatched_attr),
+            dnnl::error);
+}
+
 } // namespace dnnl
 
 #endif // DNNL_EXPERIMENTAL_GROUPED_MEMORY
