@@ -1993,6 +1993,10 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     // This is the only implementation that support the packed_sparse_weights
     // case therefore there is no fallback for it.
     is_small_shapes = is_small_shapes && !bgmmc.packed_sparse_weights;
+    //avx512 doesnt supports native s8s8, but amx does so fall back to avx512 is not supported
+    bool s8s8mul = bgmmc.src_dt == s8 && bgmmc.wei_dt == s8;
+    is_small_shapes = is_small_shapes && !s8s8mul;
+
     VCONDCHECK_BG(!is_small_shapes, VERBOSE_SMALL_SHAPES);
 
     if (bgmmc.use_buffer_b) {
