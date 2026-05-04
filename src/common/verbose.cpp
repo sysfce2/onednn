@@ -809,6 +809,15 @@ std::ostream &operator<<(std::ostream &ss, const primitive_attr_t *attr) {
                                     ss << ":" << strides_str;
                             }
                             break;
+#if DNNL_EXPERIMENTAL_GROUPED_MEMORY
+                        case format_kind::sparse:
+                            if (mdw.encoding() == sparse_encoding::grouped) {
+                                ss << ":grouped";
+                                break;
+                            }
+                            assert(!"unsupported sparse encoding");
+                            break;
+#endif
                         case format_kind::any: ss << ":any"; break;
                         default: assert(!"unsupported format_kind");
                     }
