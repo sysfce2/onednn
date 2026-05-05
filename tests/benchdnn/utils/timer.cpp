@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 #include "common.hpp"
 #include "utils/timer.hpp"
@@ -51,6 +52,7 @@ void timer_t::reset() {
     for (int i = 0; i < n_modes; ++i)
         ms_[i] = 0;
     ms_start_ = 0;
+    ms_vec_.clear();
 
     start();
 }
@@ -74,6 +76,8 @@ void timer_t::stop(int add_times, int64_t add_ticks, double add_ms) {
     ticks_[mode_t::avg] += d_ticks;
     ticks_[mode_t::sum] += d_ticks;
 
+    ms_vec_.push_back(d_ms);
+
     d_ticks /= add_times;
     d_ms /= add_times;
 
@@ -90,6 +94,27 @@ void timer_t::stop(int add_times, int64_t add_ticks, double add_ms) {
 
 void timer_t::stamp(int add_times) {
     stop(add_times, ticks_now() - ticks_start_, ms_now() - ms_start_);
+}
+
+void timer_t::filter_collection() {
+    if (times_ <= 1) return;
+
+    assert(ms_vec_.size() == times_);
+
+    size_t midpoint = ms_vec_.size() / 2;
+    auto it_mid = ms_vec_.begin() + midpoint;
+    ms_vec_.erase(ms_vec_.begin(), it_mid);
+
+    ms_[mode_t::sum] = 0;
+    ms_[mode_t::min] = DBL_MAX;
+    ms_[mode_t::max] = 0;
+    for (size_t i = 0; i < ms_vec_.size(); i++) {
+        ms_[mode_t::sum] += ms_vec_[i];
+        ms_[mode_t::min] = std::min(ms_[mode_t::min], ms_vec_[i]);
+        ms_[mode_t::max] = std::max(ms_[mode_t::max], ms_vec_[i]);
+    }
+    ms_[mode_t::avg] = ms_[mode_t::sum];
+    times_ = ms_vec_.size();
 }
 
 timer_t &timer_t::operator=(const timer_t &rhs) {
