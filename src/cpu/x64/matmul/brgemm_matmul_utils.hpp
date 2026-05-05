@@ -229,6 +229,10 @@ struct brgemm_matmul_conf_t {
     // were changed.
     bool adjust_a_strides = false;
 
+    // When dst layout is acdb, brgemm cannot write directly to dst
+    // (N stride != 1). We accumulate in a contiguous buffer and copy-out.
+    bool dst_is_acdb = false;
+
     int wsp_tile_per_thr_bytes;
     int brgemm_batch_element_per_thr_sz;
     bool is_amx;

@@ -514,6 +514,9 @@ status_t brgemm_matmul_t<isa>::init(engine_t *engine) {
         CHECK(sparse_decompress_kernel_->create_kernel());
     }
 
+    if (bgmmc.dst_is_acdb)
+        CHECK(create_brgemm_matmul_copy_c(copy_C_kernel_, &bgmmc));
+
     return status::success;
 }
 
@@ -742,12 +745,6 @@ void brgemm_matmul_t<isa>::compute_kernel(
     const int brg_ker_idx = pd()->get_brg_kernel_idx(
             is_bs_tail, do_init, m_ker_idx, n_ker_idx, false, prefetch);
     const auto ptr_bias = brgmm_ctx.get_bias_ptr(n);
-    auto ptr_D = brgmm_ctx.get_data_C_ptr(
-            b_idx, brgmm_ctx.get_M_idx(m_blk_idx, true), n);
-    auto ptr_C = (bgmmc.use_buffer_c)
-            ? brgmm_ctx.get_buf_C_ptr(ithr, m_blk_idx, n_blk_idx)
-            : ptr_D;
-
     const auto zp_comp_a
             = brgmm_ctx.get_zp_a_compensation_ptr(ithr, b_idx, n_blk_idx);
     const auto zp_comp_b
@@ -756,6 +753,14 @@ void brgemm_matmul_t<isa>::compute_kernel(
             = brgmm_ctx.get_post_ops_binary_rhs_arg_vec();
     const bool post_ops_applicable = bgmmc.post_ops_applicable
             && (brgmm_ctx.get_num_threads_for_k() <= 1 || bgmmc.K_chunks == 1);
+
+    auto ptr_D = (bgmmc.dst_is_acdb && post_ops_applicable)
+            ? brgmm_ctx.get_buf_D_acdb_ptr(ithr)
+            : brgmm_ctx.get_data_C_ptr(
+                      b_idx, brgmm_ctx.get_M_idx(m_blk_idx, true), n);
+    auto ptr_C = (bgmmc.use_buffer_c)
+            ? brgmm_ctx.get_buf_C_ptr(ithr, m_blk_idx, n_blk_idx)
+            : ptr_D;
 
     brgemm_dynamic_values_t leading_dimensions(
             bgmmc.LDA, bgmmc.LDB, brgmm_ctx.get_LDC(), brgmm_ctx.get_LDD());
@@ -873,6 +878,26 @@ void brgemm_matmul_t<isa>::compute_kernel(
 
     brgmm_ctx.maybe_restore_dst_values_from_buffer(
             ithr, b_idx, m_blk_idx, n_blk_idx);
+
+    // For acdb dst: scatter-copy from contiguous buffer to actual dst.
+    // When post_ops were applied, data is in buf_D (with LDD stride).
+    // When post_ops were NOT applied, data is in buf_C (with LDC stride).
+    if (bgmmc.dst_is_acdb && is_last_K_blk) {
+        const dim_t m_start = brgmm_ctx.get_M_idx(m_blk_idx, true);
+        const int curr_M_blk = brgmm_ctx.get_M_kernel_size(m_blk_idx);
+        const int curr_N_blk = brgmm_ctx.get_N_kernel_size(n_blk_idx);
+        const bool has_postops = post_ops_applicable;
+        const char *buf = has_postops ? brgmm_ctx.get_buf_D_acdb_ptr(ithr)
+                                      : static_cast<const char *>(ptr_C);
+        char *dst = brgmm_ctx.get_data_C_ptr(b_idx, m_start, n);
+
+        jit_brgemm_matmul_copy_c_t::ctx_t copy_c_ctx;
+        copy_c_ctx.src = buf;
+        copy_c_ctx.dst = dst;
+        copy_c_ctx.current_M_blk = curr_M_blk;
+        copy_c_ctx.current_N_blk = curr_N_blk;
+        (*copy_C_kernel_)(&copy_c_ctx);
+    }
 }
 
 template <cpu_isa_t isa>
@@ -1467,7 +1492,8 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
                 ? scratchpad.template get<char>(key_brgemm_primitive_buffer)
                 : nullptr;
 
-        buf_D_ptr_ = (bgmmc.is_runtime_M || bgmmc.is_runtime_N)
+        buf_D_ptr_ = (bgmmc.is_runtime_M || bgmmc.is_runtime_N
+                             || bgmmc.dst_is_acdb)
                 ? scratchpad.template get<char>(key_brgemm_primitive_buffer_d)
                 : nullptr;
 
@@ -2463,6 +2489,10 @@ struct brgemm_matmul_t<isa>::brg_matmul_exec_ctx_t {
     dim_t copy_B_wei_stride() const { return copy_B_wei_stride_; }
 
     bool packed_sparse_weights() const { return bgmmc_.packed_sparse_weights; }
+
+    char *get_buf_D_acdb_ptr(int ithr) const {
+        return buf_D_ptr_ + bgmmc_.c_dt_sz * bgmmc_.M_blk * bgmmc_.N_blk * ithr;
+    }
 
     int get_current_K_pad(int current_K_iters) const {
         if (bgmmc_.is_wei_zp_per_k || bgmmc_.is_wei_scale_per_k) return 0;

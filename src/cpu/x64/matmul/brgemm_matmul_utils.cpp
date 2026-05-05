@@ -667,7 +667,7 @@ status_t brgemm_matmul_conf_utils_t::set_or_check_tags(memory_desc_t &A_md,
                 : plain_tensor_layout_tag;
         bgmmc.dst_tag
                 = memory_desc_matches_one_of_tag(C_md, plain_tensor_layout_tag,
-                        allowed_transposed_tensor_layout_tag, acbd);
+                        allowed_transposed_tensor_layout_tag, acbd, acdb);
         if (bgmmc.dst_tag == format_tag::undef) {
             if (gemm_based::check_gemm_output_format(C_md)) {
                 // Note: Here we batch layout may not be accurately represented
@@ -1631,6 +1631,11 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
 
     VCHECK_BG(bm_conf_utils.set_or_check_tags(src_md, dst_md, bias_md, helper),
             VERBOSE_UNSUPPORTED_TAG);
+    bgmmc.dst_is_acdb = (bgmmc.dst_tag == format_tag::acdb);
+    // acdb dst with sum post-op is not yet supported (sum reads from D buffer
+    // which would not contain prior dst values).
+    VCONDCHECK_BG(
+            !(bgmmc.dst_is_acdb && bgmmc.with_sum), VERBOSE_UNSUPPORTED_POSTOP);
     VCHECK_BG(attr.set_default_formats(&dst_md), VERBOSE_UNSUPPORTED_TAG);
     VCONDCHECK_BG(post_ops_ok(bgmmc, attr, dst_d), VERBOSE_UNSUPPORTED_POSTOP);
 
@@ -1717,13 +1722,14 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
 
     // We cannot change M at this point as all gemv related parameters have
     // already been set up.
-    // For 4D tensors with acbd layout, avoid merging batches to prevent stride issues
+    // For 4D tensors with acbd/acdb layout, avoid merging batches to prevent stride issues
     const bool merge_batch_dims_into_M = !(bgmmc.is_gemv && bgmmc.gemv_swap_a_b)
             && bgmmc.batch > 1 && bgmmc.bcast_B_desc.bcast_across_all_batch_dims
             && plain_A_layout && helper.is_src_dst_layout_batch_fusable()
             && post_ops_ok(
                     bgmmc, attr, dst_d, true /* limit_bcast_strategies_set */)
-            && !(bgmmc.ndims == 4 && src_d.matches_tag(format_tag::acbd));
+            && !(bgmmc.ndims == 4 && src_d.matches_tag(format_tag::acbd))
+            && !bgmmc.dst_is_acdb;
     if (merge_batch_dims_into_M) {
         bgmmc.M *= bgmmc.batch;
         bgmmc.batch = 1;
@@ -1903,6 +1909,21 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
                         * (bgmmc.is_runtime_N ? bgmmc.N_chunk_size : 1)
                 : bgmmc.LDD;
     }
+
+    // For acdb dst layout, brgemm cannot write directly to dst because N
+    // stride != 1. Force buffered output path and set LDD to N_blk so that
+    // the post-ops kernel writes to a contiguous scratch buffer.
+    if (bgmmc.dst_is_acdb) {
+        bgmmc.use_buffer_c = true;
+        bgmmc.LDD = bgmmc.N_blk;
+        bgmmc.LDC = (bgmmc.is_amx ? nstl::min((dim_t)32, bgmmc.N_blk)
+                                  : bgmmc.N_blk)
+                * (bgmmc.is_runtime_N ? bgmmc.N_chunk_size : 1);
+    }
+
+    // Parallel K reduction with acdb dst is not yet supported.
+    VCONDCHECK_BG(
+            !(bgmmc.dst_is_acdb && bgmmc.nthr_k > 1), VERBOSE_UNSUPPORTED_TAG)
 
     bgmmc.is_src_batch_layout_trivial
             = is_batch_layout_trivial(src_d, bgmmc.batch);
@@ -2364,7 +2385,7 @@ void init_scratchpad(memory_tracking::registrar_t &scratchpad,
         scratchpad.book(key_conv_amx_tile_buffer,
                 static_cast<size_t>(bgmmc.nthr) * bgmmc.wsp_tile_per_thr_bytes,
                 default_data_align);
-    if (bgmmc.is_runtime_M || bgmmc.is_runtime_N)
+    if (bgmmc.is_runtime_M || bgmmc.is_runtime_N || bgmmc.dst_is_acdb)
         scratchpad.book(key_brgemm_primitive_buffer_d,
                 bgmmc.M_blk * bgmmc.N_blk * bgmmc.c_dt_sz * bgmmc.nthr,
                 default_data_align);

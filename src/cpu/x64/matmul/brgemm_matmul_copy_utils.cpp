@@ -6069,6 +6069,175 @@ status_t create_brgemm_matmul_copy_a(
     return copy_ker->create_kernel();
 }
 
+// Copy-C kernel: strided stores from contiguous buffer to non-unit-stride dst.
+// Uses extract + scalar stores which are faster than vscatterdps on Intel CPUs.
+struct jit_brgemm_matmul_copy_c_avx512_t : public jit_brgemm_matmul_copy_c_t,
+                                           public jit_generator_t {
+    DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_brgemm_matmul_copy_c_avx512_t)
+
+    jit_brgemm_matmul_copy_c_avx512_t(const brgemm_matmul_conf_t *conf)
+        : jit_brgemm_matmul_copy_c_t(conf)
+        , jit_generator_t(jit_name())
+        , dt_sz_(conf->c_dt_sz)
+        , src_stride_(conf->LDC * dt_sz_)
+        , dst_n_stride_(conf->C_strides[0])
+        , dst_m_stride_(conf->C_strides[1])
+        , simd_w_(64 / dt_sz_) {}
+
+    void operator()(ctx_t *ctx) override { jit_generator_t::operator()(ctx); }
+    status_t create_kernel() override {
+        return jit_generator_t::create_kernel();
+    }
+
+private:
+    const int dt_sz_;
+    const dim_t src_stride_;
+    const dim_t dst_n_stride_;
+    const dim_t dst_m_stride_;
+    const int simd_w_;
+
+    using reg64_t = const Reg64;
+
+    reg64_t reg_src = rax;
+    reg64_t reg_dst = rbx;
+    reg64_t reg_M = rcx;
+    reg64_t reg_N = rdx;
+    reg64_t reg_src_row = r8;
+    reg64_t reg_dst_row = r9;
+    reg64_t reg_n_iter = r10;
+    reg64_t reg_tmp = r11;
+
+    Zmm zmm_data0 = Zmm(0);
+    Xmm xmm_tmp0 = Xmm(1);
+    Xmm xmm_tmp1 = Xmm(2);
+    Xmm xmm_tmp2 = Xmm(3);
+    Xmm xmm_tmp3 = Xmm(4);
+
+    void emit_strided_store_16(const Reg64 &dst_base);
+    void generate() override;
+};
+
+void jit_brgemm_matmul_copy_c_avx512_t::emit_strided_store_16(
+        const Reg64 &dst_base) {
+    // Extract 4 xmm lanes from zmm and store each f32 with dst_n_stride
+    vextractf32x4(xmm_tmp0, zmm_data0, 0);
+    vextractf32x4(xmm_tmp1, zmm_data0, 1);
+    vextractf32x4(xmm_tmp2, zmm_data0, 2);
+    vextractf32x4(xmm_tmp3, zmm_data0, 3);
+
+    // Elements 0-3
+    movss(ptr[dst_base + 0 * dst_n_stride_], xmm_tmp0);
+    extractps(ptr[dst_base + 1 * dst_n_stride_], xmm_tmp0, 1);
+    extractps(ptr[dst_base + 2 * dst_n_stride_], xmm_tmp0, 2);
+    extractps(ptr[dst_base + 3 * dst_n_stride_], xmm_tmp0, 3);
+
+    // Elements 4-7
+    movss(ptr[dst_base + 4 * dst_n_stride_], xmm_tmp1);
+    extractps(ptr[dst_base + 5 * dst_n_stride_], xmm_tmp1, 1);
+    extractps(ptr[dst_base + 6 * dst_n_stride_], xmm_tmp1, 2);
+    extractps(ptr[dst_base + 7 * dst_n_stride_], xmm_tmp1, 3);
+
+    // Elements 8-11
+    movss(ptr[dst_base + 8 * dst_n_stride_], xmm_tmp2);
+    extractps(ptr[dst_base + 9 * dst_n_stride_], xmm_tmp2, 1);
+    extractps(ptr[dst_base + 10 * dst_n_stride_], xmm_tmp2, 2);
+    extractps(ptr[dst_base + 11 * dst_n_stride_], xmm_tmp2, 3);
+
+    // Elements 12-15
+    movss(ptr[dst_base + 12 * dst_n_stride_], xmm_tmp3);
+    extractps(ptr[dst_base + 13 * dst_n_stride_], xmm_tmp3, 1);
+    extractps(ptr[dst_base + 14 * dst_n_stride_], xmm_tmp3, 2);
+    extractps(ptr[dst_base + 15 * dst_n_stride_], xmm_tmp3, 3);
+}
+
+void jit_brgemm_matmul_copy_c_avx512_t::generate() {
+    preamble();
+
+    mov(reg_src, ptr[abi_param1 + GET_OFF(src)]);
+    mov(reg_dst, ptr[abi_param1 + GET_OFF(dst)]);
+
+    Label m_loop_label, done_label;
+
+    mov(reg_src_row, reg_src);
+    mov(reg_dst_row, reg_dst);
+    mov(reg_M, ptr[abi_param1 + GET_OFF(current_M_blk)]);
+
+    L(m_loop_label);
+    cmp(reg_M, 0);
+    jle(done_label, T_NEAR);
+
+    xor_(reg_n_iter, reg_n_iter);
+    mov(reg_N, ptr[abi_param1 + GET_OFF(current_N_blk)]);
+
+    Label n_loop_label, n_tail_label, row_done_label;
+    L(n_loop_label);
+    {
+        mov(reg_tmp, reg_N);
+        sub(reg_tmp, reg_n_iter);
+        cmp(reg_tmp, simd_w_);
+        jl(n_tail_label, T_NEAR);
+
+        // Load 16 contiguous f32 from src buffer
+        vmovups(zmm_data0, ptr[reg_src_row + reg_n_iter * dt_sz_]);
+
+        // Prefetch next batch of dst cache lines
+        for (int i = 0; i < simd_w_; i++) {
+            prefetchw(ptr[reg_dst_row + (simd_w_ + i) * dst_n_stride_]);
+        }
+
+        // Store with stride using extract + scalar stores
+        emit_strided_store_16(reg_dst_row);
+
+        add(reg_dst_row, simd_w_ * dst_n_stride_);
+        add(reg_n_iter, simd_w_);
+        jmp(n_loop_label, T_NEAR);
+    }
+
+    L(n_tail_label);
+    {
+        mov(reg_tmp, reg_N);
+        sub(reg_tmp, reg_n_iter);
+        cmp(reg_tmp, 0);
+        jle(row_done_label, T_NEAR);
+
+        // Scalar tail loop
+        Label tail_loop, tail_done;
+        L(tail_loop);
+        cmp(reg_n_iter, reg_N);
+        jge(tail_done, T_NEAR);
+
+        movss(xmm_tmp0, ptr[reg_src_row + reg_n_iter * dt_sz_]);
+        movss(ptr[reg_dst_row], xmm_tmp0);
+        add(reg_dst_row, dst_n_stride_);
+        inc(reg_n_iter);
+        jmp(tail_loop, T_NEAR);
+
+        L(tail_done);
+        jmp(row_done_label, T_NEAR);
+    }
+
+    L(row_done_label);
+    add(reg_src_row, src_stride_);
+    mov(reg_dst_row, reg_dst);
+    dec(reg_M);
+    add(reg_dst, dst_m_stride_);
+    mov(reg_dst_row, reg_dst);
+
+    cmp(reg_M, 0);
+    jg(m_loop_label, T_NEAR);
+
+    L(done_label);
+
+    postamble();
+}
+
+status_t create_brgemm_matmul_copy_c(
+        std::unique_ptr<jit_brgemm_matmul_copy_c_t> &copy_ker,
+        const brgemm_matmul_conf_t *conf) {
+    copy_ker = utils::make_unique<jit_brgemm_matmul_copy_c_avx512_t>(conf);
+    return copy_ker->create_kernel();
+}
+
 } // namespace matmul
 } // namespace x64
 } // namespace cpu
