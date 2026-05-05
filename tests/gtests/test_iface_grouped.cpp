@@ -490,6 +490,10 @@ HANDLE_EXCEPTIONS_FOR_TEST(iface_grouped_test_t, TestMaxGroupMHint) {
 HANDLE_EXCEPTIONS_FOR_TEST(iface_grouped_test_t, TestBinaryPostOpPDCreation) {
     engine eng = get_test_engine();
 
+    // TODO: remove once GPU supports binary post-ops for grouped matmul
+    SKIP_IF(eng.get_kind() == engine::kind::gpu,
+            "Binary post-ops for grouped matmul are not supported on GPU");
+
     const int ngroups = 2;
     auto src_md = memory::desc::grouped({6, 4}, dt::f32, 0, ngroups);
     auto wei_md
