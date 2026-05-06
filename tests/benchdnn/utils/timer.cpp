@@ -101,6 +101,14 @@ void timer_t::filter_collection() {
 
     assert(ms_vec_.size() == times_);
 
+    // auto min_val = DBL_MAX;
+    // for (size_t i = 0; i < ms_vec_.size(); i++) {
+    //     if (ms_vec_[i] < min_val) {
+    //         printf("ms[%zu/%zu]=%g\n", i, ms_vec_.size(), ms_vec_[i]);
+    //         min_val = ms_vec_[i];
+    //     }
+    // }
+
     size_t midpoint = ms_vec_.size() / 2;
     auto it_mid = ms_vec_.begin() + midpoint;
     ms_vec_.erase(ms_vec_.begin(), it_mid);
